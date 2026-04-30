@@ -9,10 +9,10 @@ const GRID_SIZES = [11, 15, 21, 31];
 const DEFAULT_SIZE = 15;
 
 const MODES = [
-  { id: 'obstacle', label: '🧱 Engel',      title: 'Statik engel koy/kaldır' },
-  { id: 'dynamic',  label: '🚗 Hareketli',  title: 'Hareketli engel ekle/kaldır' },
-  { id: 'start',    label: '🤖 Başlangıç',  title: 'Başlangıç konumunu seç' },
-  { id: 'goal',     label: '🎯 Hedef',       title: 'Hedef konumunu seç' },
+  { id: 'obstacle', label: '⬛ Engel',      title: 'Statik engel koy / kaldır' },
+  { id: 'dynamic',  label: '🔮 Hareketli',  title: 'Hareketli engel ekle / kaldır' },
+  { id: 'start',    label: '🟢 Başlangıç',  title: 'Başlangıç noktasını seç' },
+  { id: 'goal',     label: '🟠 Hedef',       title: 'Hedef noktasını seç' },
 ];
 
 const PATTERNS = [
@@ -210,8 +210,8 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Grid World — DRL Simülatörü</h1>
-        <p>Koordinat düzlemi · Orijin (0,0) gridin tam ortası</p>
+        <h1>Grid World Simülatörü</h1>
+        <p>Ortam tasarla, engelleri yerleştir ve ajanını eğit &nbsp;·&nbsp; Merkez (0, 0)</p>
       </header>
 
       {/* Mod seçici */}
@@ -282,8 +282,8 @@ export default function App() {
         <div className="control-group">
           <button id="btn-train" className="btn btn-primary"
             disabled={!startPos||!goalPos}
-            title={!startPos||!goalPos?'Önce başlangıç ve hedef seç':''}>
-            ▶ Eğitimi Başlat
+            title={!startPos||!goalPos?'Önce başlangıç ve hedef noktalarını seç':''}>
+            Eğitimi Başlat →
           </button>
         </div>
       </div>
