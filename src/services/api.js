@@ -64,24 +64,34 @@ export function buildGameMapDTO({ mapName, size, baseGrid, dynamicObstacles, sta
   // Grid (row,col) → koordinat (x,y)
   const toCoord = (row, col) => ({ x: col - half, y: half - row });
 
+  // StaticObstacleDTO: x, y, w, h — grid hücreleri için w=1, h=1
   const staticObstacles = [];
   baseGrid.forEach((row, r) =>
     row.forEach((cell, c) => {
-      if (cell === 'obstacle') staticObstacles.push(toCoord(r, c));
+      if (cell === 'obstacle') {
+        const { x, y } = toCoord(r, c);
+        staticObstacles.push({ x, y, w: 1, h: 1 });
+      }
     })
   );
 
-  const dynamicObs = dynamicObstacles.map(o => ({
-    ...toCoord(o.row, o.col),
-    vx: o.direction ?? 1,
-    vy: 0,
-  }));
+  // DynamicObstacleDTO: id, pos:{x,y}, velocity:{vx,vy}, range, type
+  const dynamicObs = dynamicObstacles.map((o, idx) => {
+    const { x, y } = toCoord(o.row, o.col);
+    return {
+      id:       idx + 1,
+      pos:      { x, y },
+      velocity: { vx: o.direction ?? 1, vy: 0 },
+      range:    null,
+      type:     o.pattern ?? 'linear-h',
+    };
+  });
 
   return {
     map_name:   mapName,
     grid_size:  { x: size, y: size },
-    start_pos:  startPos ? toCoord(startPos.row, startPos.col)  : { x: 0, y: 0 },
-    target_pos: goalPos  ? toCoord(goalPos.row,  goalPos.col)   : { x: 1, y: 1 },
+    start_pos:  startPos ? toCoord(startPos.row, startPos.col) : { x: 0, y: 0 },
+    target_pos: goalPos  ? toCoord(goalPos.row,  goalPos.col)  : { x: 1, y: 1 },
     obstacles: {
       static:  staticObstacles,
       dynamic: dynamicObs,
