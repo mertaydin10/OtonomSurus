@@ -1,11 +1,13 @@
 // src/App.jsx
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import './App.css';
 import Grid from './components/Grid';
 import useInterval from './hooks/useInterval';
+import { saveMap, buildGameMapDTO } from './services/api';
+import { useSimulation } from './hooks/useSimulation';
 
 /* ─── Sabitler ─── */
-const GRID_SIZES = [11, 15, 21, 31];
+const GRID_SIZES   = [11, 15, 21, 31];
 const DEFAULT_SIZE = 15;
 
 const MODES = [
@@ -51,38 +53,53 @@ export default function App() {
   const [isMoving,         setIsMoving]         = useState(false);
   const [simSpeed,         setSimSpeed]         = useState(450);
 
-  /* Görüntüleme gridi: baseGrid üstüne dinamik engelleri bindiriyoruz */
+  /* ── Backend eğitim durumu ── */
+  const [isSaving,         setIsSaving]         = useState(false);
+  const [saveStatus,       setSaveStatus]       = useState(null); // 'ok' | 'error' | null
+  const [isTraining,       setIsTraining]       = useState(false);
+  const [lastAction,       setLastAction]       = useState(null); // SimulationResponseDTO
+  const mapNameRef = useRef('harita1');
+
+  /* ── WebSocket simülasyon hook ── */
+  const { connect, disconnect, sendTick, connected } = useSimulation({
+    onResponse: useCallback((res) => {
+      setLastAction(res);
+      // İleride: ajanı grid üzerinde hareket ettir
+      console.log('[SIM] Aksiyon:', res.action_label, '| Q:', res.q_values);
+    }, []),
+    onError: useCallback((msg) => {
+      console.error('[SIM] Hata:', msg);
+      setSaveStatus('error');
+    }, []),
+  });
+
+  /* Görüntüleme gridi */
   const displayGrid = useMemo(() => {
     const dg = baseGrid.map(r => [...r]);
     dynamicObstacles.forEach(o => { dg[o.row][o.col] = 'dynamic'; });
     return dg;
   }, [baseGrid, dynamicObstacles]);
 
-  /* ─── Hareket tiki ─── */
+  /* ─── Yerel hareket tiki (dinamik engeller için) ─── */
   const tick = useCallback(() => {
     setDynamicObstacles(prev => {
-
-      /* Statik engel / sınır kontrolü */
       const isStaticBlocked = (r, c) =>
         r < 0 || r >= size || c < 0 || c >= size ||
         baseGrid[r]?.[c] === 'obstacle' ||
         (startPos && r === startPos.row && c === startPos.col) ||
         (goalPos  && r === goalPos.row  && c === goalPos.col);
 
-      /* ── Faz 1: her engel için hedef pozisyonu hesapla ── */
       const moves = prev.map(obs => {
         const { row, col, direction, pattern: p } = obs;
-
         if (p === 'linear-h' || p === 'linear-v') {
           const dr = p === 'linear-v' ? direction : 0;
           const dc = p === 'linear-h' ? direction : 0;
           if (!isStaticBlocked(row + dr, col + dc))
             return { row: row + dr, col: col + dc, dir: direction, moved: true };
-          // Statik engele çarptı — ters yöne dön
           if (!isStaticBlocked(row - dr, col - dc))
             return { row: row - dr, col: col - dc, dir: -direction, moved: true };
-          return { row, col, dir: direction, moved: false }; // sıkıştı
-        } else { // random
+          return { row, col, dir: direction, moved: false };
+        } else {
           const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
           const valid = dirs.filter(([dr,dc]) => !isStaticBlocked(row+dr, col+dc));
           if (!valid.length) return { row, col, dir: direction, moved: false };
@@ -91,47 +108,25 @@ export default function App() {
         }
       });
 
-      /* ── Faz 2: dinamik çarpışmaları çöz ── */
       const resolved = moves.map((m, i) => {
         if (!m.moved) return m;
-
         const obs = prev[i];
-        const revert = (flipDir) => ({
-          row: obs.row, col: obs.col,
-          dir: flipDir ? -m.dir : m.dir,
-          moved: false,
-        });
-
-        // 1) Aynı hedefe iki engel gitmek istiyor mu?
-        const contested = moves.some((o, j) =>
-          j !== i && o.moved && o.row === m.row && o.col === m.col
-        );
+        const revert = (flipDir) => ({ row: obs.row, col: obs.col, dir: flipDir ? -m.dir : m.dir, moved: false });
+        const contested = moves.some((o, j) => j !== i && o.moved && o.row === m.row && o.col === m.col);
         if (contested) return revert(obs.pattern !== 'random');
-
-        // 2) Hedef hücre başka bir engel tarafından işgal edilmiş
-        //    ve o engel oradan ayrılmıyor mu?
-        const occupierIdx = prev.findIndex((o, j) =>
-          j !== i && o.row === m.row && o.col === m.col
-        );
+        const occupierIdx = prev.findIndex((o, j) => j !== i && o.row === m.row && o.col === m.col);
         if (occupierIdx !== -1) {
           const oMove = moves[occupierIdx];
-          // İşgalci hâlâ orada duruyorsa hareket etme
-          if (oMove.row === m.row && oMove.col === m.col)
-            return revert(obs.pattern !== 'random');
+          if (oMove.row === m.row && oMove.col === m.col) return revert(obs.pattern !== 'random');
         }
-
-        // 3) Swap tespiti: A→B, B→A durumunda ikisi de geri dönsün
         const swapIdx = prev.findIndex((o, j) =>
-          j !== i &&
-          o.row === m.row && o.col === m.col &&       // B şu an A'nın gideceği yerde
-          moves[j].row === obs.row && moves[j].col === obs.col // B de A'nın yerine gitmek istiyor
+          j !== i && o.row === m.row && o.col === m.col &&
+          moves[j].row === obs.row && moves[j].col === obs.col
         );
         if (swapIdx !== -1) return revert(obs.pattern !== 'random');
-
         return m;
       });
 
-      /* Sonuçları state'e uygula */
       return prev.map((obs, i) => ({
         ...obs,
         row:       resolved[i].row,
@@ -146,7 +141,6 @@ export default function App() {
   /* ─── Hücre tıklaması ─── */
   const handleCellClick = useCallback((row, col) => {
     const cell = displayGrid[row][col];
-
     if (mode === 'obstacle') {
       if (cell === 'start' || cell === 'goal' || cell === 'dynamic') return;
       setBaseGrid(prev => {
@@ -154,18 +148,11 @@ export default function App() {
         ng[row][col] = cell === 'obstacle' ? 'empty' : 'obstacle';
         return ng;
       });
-
     } else if (mode === 'dynamic') {
       const existing = dynamicObstacles.find(o => o.row === row && o.col === col);
-      if (existing) {
-        setDynamicObstacles(prev => prev.filter(o => o.id !== existing.id));
-        return;
-      }
+      if (existing) { setDynamicObstacles(prev => prev.filter(o => o.id !== existing.id)); return; }
       if (cell === 'obstacle' || cell === 'start' || cell === 'goal') return;
-      setDynamicObstacles(prev => [...prev, {
-        id: `dyn-${++dynCounter}`, row, col, pattern, direction: 1,
-      }]);
-
+      setDynamicObstacles(prev => [...prev, { id: `dyn-${++dynCounter}`, row, col, pattern, direction: 1 }]);
     } else if (mode === 'start') {
       if (cell === 'goal' || cell === 'dynamic') return;
       setBaseGrid(prev => {
@@ -175,7 +162,6 @@ export default function App() {
         return ng;
       });
       setStartPos({ row, col });
-
     } else if (mode === 'goal') {
       if (cell === 'start' || cell === 'dynamic') return;
       setBaseGrid(prev => {
@@ -192,14 +178,58 @@ export default function App() {
   const handleSizeChange = (e) => {
     const s = Number(e.target.value);
     setSize(s); setBaseGrid(createEmptyGrid(s));
-    setDynamicObstacles([]); setStartPos(null); setGoalPos(null); setIsMoving(false);
+    setDynamicObstacles([]); setStartPos(null); setGoalPos(null);
+    setIsMoving(false); setIsTraining(false); setLastAction(null);
+    disconnect();
   };
+
   const clearStatic  = () => setBaseGrid(p => p.map(r => r.map(c => c==='obstacle'?'empty':c)));
   const clearDynamic = () => { setDynamicObstacles([]); setIsMoving(false); };
   const reset        = () => {
     setBaseGrid(createEmptyGrid(size)); setDynamicObstacles([]);
     setStartPos(null); setGoalPos(null); setIsMoving(false);
+    setIsTraining(false); setLastAction(null); setSaveStatus(null);
+    disconnect();
   };
+
+  /* ─── Eğitimi Başlat: haritayı kaydet + WS bağlan ─── */
+  const handleTrainClick = useCallback(async () => {
+    if (!startPos || !goalPos) return;
+
+    // Eğitim zaten çalışıyorsa durdur
+    if (isTraining) {
+      disconnect();
+      setIsTraining(false);
+      setLastAction(null);
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveStatus(null);
+
+    try {
+      const payload = buildGameMapDTO({
+        mapName: mapNameRef.current,
+        size,
+        baseGrid,
+        dynamicObstacles,
+        startPos,
+        goalPos,
+      });
+
+      await saveMap(payload);
+      setSaveStatus('ok');
+
+      // Harita kaydedildikten sonra WebSocket bağlantısı kur
+      connect();
+      setIsTraining(true);
+    } catch (err) {
+      console.error('Kayıt hatası:', err);
+      setSaveStatus('error');
+    } finally {
+      setIsSaving(false);
+    }
+  }, [isTraining, startPos, goalPos, size, baseGrid, dynamicObstacles, connect, disconnect]);
 
   const center      = Math.floor(size / 2);
   const staticCount = countType(baseGrid, 'obstacle');
@@ -279,14 +309,54 @@ export default function App() {
         </div>
         <div className="control-divider" />
 
+        {/* Harita adı input */}
         <div className="control-group">
-          <button id="btn-train" className="btn btn-primary"
-            disabled={!startPos||!goalPos}
-            title={!startPos||!goalPos?'Önce başlangıç ve hedef noktalarını seç':''}>
-            Eğitimi Başlat →
+          <input
+            id="map-name-input"
+            className="map-name-input"
+            type="text"
+            defaultValue={mapNameRef.current}
+            onChange={e => { mapNameRef.current = e.target.value.trim() || 'harita1'; }}
+            placeholder="Harita adı"
+            maxLength={32}
+          />
+        </div>
+
+        {/* Eğitimi Başlat / Durdur */}
+        <div className="control-group">
+          <button id="btn-train"
+            className={`btn ${isTraining ? 'btn-stop' : 'btn-primary'}`}
+            onClick={handleTrainClick}
+            disabled={(!startPos || !goalPos) || isSaving}
+            title={!startPos||!goalPos ? 'Önce başlangıç ve hedef noktalarını seç' : ''}>
+            {isSaving
+              ? '⏳ Kaydediliyor…'
+              : isTraining
+                ? '⏹ Eğitimi Durdur'
+                : 'Eğitimi Başlat →'}
           </button>
         </div>
       </div>
+
+      {/* Backend durum bildirimi */}
+      {saveStatus && (
+        <div className={`save-toast save-toast--${saveStatus}`} role="status">
+          {saveStatus === 'ok'
+            ? `✓ Harita kaydedildi${connected ? ' · Simülasyon bağlandı' : ''}`
+            : '✗ Backend bağlantı hatası — konsolu kontrol et'}
+        </div>
+      )}
+
+      {/* Son aksiyon bilgisi */}
+      {lastAction && (
+        <div className="action-badge">
+          <span className="action-badge__label">Son Aksiyon</span>
+          <span className="action-badge__value">{lastAction.action_label}</span>
+          <span className="action-badge__q">
+            Q: [{lastAction.q_values?.map(v => v.toFixed(2)).join(', ')}]
+          </span>
+        </div>
+      )}
 
       <Grid grid={displayGrid} onCellClick={handleCellClick}
         size={size} center={center} indexToCoord={indexToCoord} activeMode={mode} />
