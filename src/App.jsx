@@ -1,9 +1,9 @@
 // src/App.jsx
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import './App.css';
 import Grid from './components/Grid';
 import useInterval from './hooks/useInterval';
-import { saveMap, buildGameMapDTO } from './services/api';
+import { saveMap, saveMapToPython, buildGameMapDTO } from './services/api';
 import { useSimulation } from './hooks/useSimulation';
 
 /* ─── Sabitler ─── */
@@ -14,7 +14,7 @@ const MODES = [
   { id: 'obstacle', label: '⬛ Engel',      title: 'Statik engel koy / kaldır' },
   { id: 'dynamic',  label: '🔮 Hareketli',  title: 'Hareketli engel ekle / kaldır' },
   { id: 'start',    label: '🟢 Başlangıç',  title: 'Başlangıç noktasını seç' },
-  { id: 'goal',     label: '🟠 Hedef',       title: 'Hedef noktasını seç' },
+  { id: 'goal',     label: '🏁 Hedef',       title: 'Hedef noktasını seç' },
 ];
 
 const PATTERNS = [
@@ -41,6 +41,16 @@ function createEmptyGrid(size) {
 }
 function countType(grid, type) { return grid.flat().filter(c => c === type).length; }
 
+/** Grid (row,col) → Kartezyen (x,y) */
+function toCartesian(row, col, half) {
+  return { x: col - half, y: half - row };
+}
+
+/** Kartezyen (x,y) → grid (row,col) */
+function toGridPos(x, y, half) {
+  return { row: half - y, col: x + half };
+}
+
 /* ─── App ─── */
 export default function App() {
   const [size,             setSize]             = useState(DEFAULT_SIZE);
@@ -56,31 +66,85 @@ export default function App() {
   /* ── Backend eğitim durumu ── */
   const [isSaving,         setIsSaving]         = useState(false);
   const [saveStatus,       setSaveStatus]       = useState(null); // 'ok' | 'error' | null
+  const [saveStatusDetail, setSaveStatusDetail] = useState({ spring: false, python: false });
   const [isTraining,       setIsTraining]       = useState(false);
   const [lastAction,       setLastAction]       = useState(null); // SimulationResponseDTO
-  const mapNameRef = useRef('harita1');
+  const [episodeEnd,       setEpisodeEnd]       = useState(null); // 'goal' | 'collision' | null
+
+  /* ── Ajan grid pozisyonu ── */
+  const [agentGridPos,     setAgentGridPos]     = useState(null); // { row, col }
+
+  const mapNameRef   = useRef('harita1');
+  const firstTickRef = useRef(null); // İlk tick: grid + start + goal gönderilir
 
   /* ── WebSocket simülasyon hook ── */
   const { connect, disconnect, sendTick, connected } = useSimulation({
     onResponse: useCallback((res) => {
       setLastAction(res);
-      // İleride: ajanı grid üzerinde hareket ettir
-      console.log('[SIM] Aksiyon:', res.action_label, '| Q:', res.q_values);
+
+      // Ajan pozisyonunu grid üzerinde güncelle
+      if (res.agent_pos != null) {
+        setSize(prev => {
+          const half = Math.floor(prev / 2);
+          const gp = toGridPos(res.agent_pos.x, res.agent_pos.y, half);
+          // Sınır kontrolü
+          if (gp.row >= 0 && gp.row < prev && gp.col >= 0 && gp.col < prev) {
+            console.log(`[COORD] Cartesian(${res.agent_pos.x},${res.agent_pos.y}) → Grid(${gp.row},${gp.col})`);
+            setAgentGridPos(gp);
+          } else {
+            console.warn(`[COORD] Out of bounds: Cartesian(${res.agent_pos.x},${res.agent_pos.y}) → Grid(${gp.row},${gp.col}) (size=${prev})`);
+          }
+          return prev;
+        });
+      }
+
+      // Episode sonu kontrol
+      if (res.reached_goal) {
+        console.log('[SIM] Hedefe ulasildi! Episode:', res.episode);
+        setEpisodeEnd('goal');
+        setIsTraining(false);
+      } else if (res.stuck) {
+        console.log('[SIM] Ajan salinimda sikisti, episode sonlandi.');
+        setEpisodeEnd('stuck');
+        setIsTraining(false);
+      } else if (res.done) {
+        console.log('[SIM] Episode sona erdi (engel/sinir). Episode:', res.episode);
+        setEpisodeEnd('collision');
+        setIsTraining(false);
+      }
+
+      console.log('[SIM]', res.action_label, '| reward:', res.reward, '| pos:', res.agent_pos);
     }, []),
+
     onError: useCallback((msg) => {
       console.error('[SIM] Hata:', msg);
       setSaveStatus('error');
     }, []),
   });
 
-  /* Görüntüleme gridi */
+  /* ── İlk tick: WS açıldığında grid + start + goal gönder ── */
+  useEffect(() => {
+    if (connected && firstTickRef.current) {
+      sendTick(firstTickRef.current);
+      firstTickRef.current = null;
+    }
+  }, [connected, sendTick]);
+
+  /* Görüntüleme gridi — agent üstte gösterilir */
   const displayGrid = useMemo(() => {
     const dg = baseGrid.map(r => [...r]);
     dynamicObstacles.forEach(o => { dg[o.row][o.col] = 'dynamic'; });
+    if (
+      agentGridPos &&
+      agentGridPos.row >= 0 && agentGridPos.row < size &&
+      agentGridPos.col >= 0 && agentGridPos.col < size
+    ) {
+      dg[agentGridPos.row][agentGridPos.col] = 'agent';
+    }
     return dg;
-  }, [baseGrid, dynamicObstacles]);
+  }, [baseGrid, dynamicObstacles, agentGridPos, size]);
 
-  /* ─── Yerel hareket tiki (dinamik engeller için) ─── */
+  /* ─── Yerel hareket tiki (dinamik engeller) ─── */
   const tick = useCallback(() => {
     setDynamicObstacles(prev => {
       const isStaticBlocked = (r, c) =>
@@ -138,11 +202,21 @@ export default function App() {
 
   useInterval(tick, isMoving ? simSpeed : null);
 
+  /* ─── AI simülasyon tick döngüsü ─── */
+  useInterval(
+    useCallback(() => {
+      // Sadece map_name gönder — grid /maps/load'da zaten load olmuş
+      // Her tick'te grid gönderirse agent position başlangıca reset olur!
+      sendTick({ map_name: mapNameRef.current });
+    }, [sendTick, mapNameRef]),
+    isTraining && connected ? simSpeed : null
+  );
+
   /* ─── Hücre tıklaması ─── */
   const handleCellClick = useCallback((row, col) => {
     const cell = displayGrid[row][col];
     if (mode === 'obstacle') {
-      if (cell === 'start' || cell === 'goal' || cell === 'dynamic') return;
+      if (cell === 'start' || cell === 'goal' || cell === 'dynamic' || cell === 'agent') return;
       setBaseGrid(prev => {
         const ng = prev.map(r => [...r]);
         ng[row][col] = cell === 'obstacle' ? 'empty' : 'obstacle';
@@ -151,7 +225,7 @@ export default function App() {
     } else if (mode === 'dynamic') {
       const existing = dynamicObstacles.find(o => o.row === row && o.col === col);
       if (existing) { setDynamicObstacles(prev => prev.filter(o => o.id !== existing.id)); return; }
-      if (cell === 'obstacle' || cell === 'start' || cell === 'goal') return;
+      if (cell === 'obstacle' || cell === 'start' || cell === 'goal' || cell === 'agent') return;
       setDynamicObstacles(prev => [...prev, { id: `dyn-${++dynCounter}`, row, col, pattern, direction: 1 }]);
     } else if (mode === 'start') {
       if (cell === 'goal' || cell === 'dynamic') return;
@@ -180,6 +254,7 @@ export default function App() {
     setSize(s); setBaseGrid(createEmptyGrid(s));
     setDynamicObstacles([]); setStartPos(null); setGoalPos(null);
     setIsMoving(false); setIsTraining(false); setLastAction(null);
+    setAgentGridPos(null);
     disconnect();
   };
 
@@ -189,18 +264,28 @@ export default function App() {
     setBaseGrid(createEmptyGrid(size)); setDynamicObstacles([]);
     setStartPos(null); setGoalPos(null); setIsMoving(false);
     setIsTraining(false); setLastAction(null); setSaveStatus(null);
+    setAgentGridPos(null); setSaveStatusDetail({ spring: false, python: false });
+    setEpisodeEnd(null);
     disconnect();
   };
 
-  /* ─── Eğitimi Başlat: haritayı kaydet + WS bağlan ─── */
+  /* ─── Eğitimi Başlat: haritayı Spring+Python'a kaydet + WS bağlan ─── */
   const handleTrainClick = useCallback(async () => {
     if (!startPos || !goalPos) return;
+
+    // En az 3 engel olmadan model açık haritada salınım yapar
+    const obstacleCount = countType(baseGrid, 'obstacle') + dynamicObstacles.length;
+    if (obstacleCount < 3) {
+      setSaveStatus('need-obstacles');
+      return;
+    }
 
     // Eğitim zaten çalışıyorsa durdur
     if (isTraining) {
       disconnect();
       setIsTraining(false);
       setLastAction(null);
+      setAgentGridPos(null);
       return;
     }
 
@@ -208,6 +293,8 @@ export default function App() {
     setSaveStatus(null);
 
     try {
+      console.log('[DEBUG] startPos:', startPos, 'goalPos:', goalPos);
+      // buildGameMapDTO çıktısı hem Spring hem Python ile uyumlu
       const payload = buildGameMapDTO({
         mapName: mapNameRef.current,
         size,
@@ -216,13 +303,60 @@ export default function App() {
         startPos,
         goalPos,
       });
+      console.log('[DEBUG] payload start_pos:', payload.start_pos, 'target_pos:', payload.target_pos);
 
-      await saveMap(payload);
+      let springOk = false;
+      let pythonOk = false;
+
+      // 1) Spring Boot'a haritayı kaydet (DB) — opsiyonel, çalışmasa da devam
+      try {
+        await saveMap(payload);
+        springOk = true;
+        console.log('[INIT] Spring Boot harita kaydedildi');
+      } catch (springErr) {
+        console.warn('[INIT] Spring Boot erişilemiyor, devam ediliyor:', springErr.message);
+      }
+
+      // 2) Python modeline haritayı yükle (sim_env başlat) — zorunlu
+      try {
+        await saveMapToPython(payload);
+        pythonOk = true;
+        console.log('[INIT] Python harita yüklendi:', mapNameRef.current);
+      } catch (pyErr) {
+        console.warn('[INIT] Python harita yüklenemedi:', pyErr.message);
+      }
+
+      if (!pythonOk) {
+        // Python da yoksa gerçek hata
+        throw new Error('Python AI servisi (8000) erişilemiyor. Terminalde uvicorn çalışıyor mu?');
+      }
+
       setSaveStatus('ok');
+      setSaveStatusDetail({ spring: springOk, python: pythonOk });
 
-      // Harita kaydedildikten sonra WebSocket bağlantısı kur
+
+      // Ajanı başlangıç pozisyonuna yerleştir
+      if (startPos) {
+        setAgentGridPos({ row: startPos.row, col: startPos.col });
+      }
+
+      // İlk WS tick'ini hazırla: grid + start + goal → Python sim_env'i senkronize et
+      const half    = Math.floor(size / 2);
+      const gridArr = baseGrid.map(row => row.map(cell => cell === 'obstacle' ? 1 : 0));
+      const startC  = toCartesian(startPos.row, startPos.col, half);
+      const goalC   = toCartesian(goalPos.row,  goalPos.col,  half);
+
+      firstTickRef.current = {
+        map_name:  mapNameRef.current,
+        grid:      gridArr,
+        agent_pos: startC,
+        goal_pos:  goalC,
+      };
+
+      // WebSocket bağlantısını kur — bağlandığında useEffect ilk tick'i gönderir
       connect();
       setIsTraining(true);
+
     } catch (err) {
       console.error('Kayıt hatası:', err);
       setSaveStatus('error');
@@ -236,6 +370,7 @@ export default function App() {
   const dynCount    = dynamicObstacles.length;
   const startCoord  = startPos ? indexToCoord(startPos.row, startPos.col, size) : null;
   const goalCoord   = goalPos  ? indexToCoord(goalPos.row,  goalPos.col,  size) : null;
+  const agentCoord  = agentGridPos ? indexToCoord(agentGridPos.row, agentGridPos.col, size) : null;
 
   return (
     <div className="app">
@@ -284,8 +419,7 @@ export default function App() {
           {SPEEDS.map(sp => (
             <button key={sp.ms}
               className={`speed-btn${simSpeed===sp.ms?' speed-btn--active':''}`}
-              onClick={() => setSimSpeed(sp.ms)}
-              disabled={mode !== 'dynamic'}>
+              onClick={() => setSimSpeed(sp.ms)}>
               {sp.label}
             </button>
           ))}
@@ -332,29 +466,54 @@ export default function App() {
             {isSaving
               ? '⏳ Kaydediliyor…'
               : isTraining
-                ? '⏹ Eğitimi Durdur'
-                : 'Eğitimi Başlat →'}
+                ? '⏹ Simülasyonu Durdur'
+                : '🤖 Simülasyonu Başlat →'}
           </button>
+          {!isTraining && (
+            <span style={{
+              fontSize: '11px',
+              color: (staticCount + dynCount) >= 3 ? '#4caf50' : '#ff9800',
+              marginTop: '4px',
+              display: 'block',
+            }}>
+              Engel: {staticCount + dynCount} / 3 gerekli
+            </span>
+          )}
         </div>
       </div>
 
       {/* Backend durum bildirimi */}
       {saveStatus && (
-        <div className={`save-toast save-toast--${saveStatus}`} role="status">
+        <div className={`save-toast save-toast--${saveStatus === 'need-obstacles' ? 'error' : saveStatus}`} role="status">
           {saveStatus === 'ok'
-            ? `✓ Harita kaydedildi${connected ? ' · Simülasyon bağlandı' : ''}`
-            : '✗ Backend bağlantı hatası — konsolu kontrol et'}
+            ? [
+                '✓',
+                saveStatusDetail.spring ? ' Spring ✅' : ' Spring ⚠️ kapalı',
+                saveStatusDetail.python ? ' · Python AI ✅' : ' · Python AI ❌',
+                connected ? ' · WS bağlı 🟢' : ' · WS bağlanıyor…',
+              ].join('')
+            : saveStatus === 'need-obstacles'
+            ? '⚠️ En az 3 engel gerekli — model açık haritalarda düzgün çalışmaz!'
+            : '✗ Python AI (8000) erişilemiyor — terminalde uvicorn çalışıyor mu?'}
         </div>
       )}
 
       {/* Son aksiyon bilgisi */}
       {lastAction && (
         <div className="action-badge">
-          <span className="action-badge__label">Son Aksiyon</span>
+          <span className="action-badge__label">Aksiyon</span>
           <span className="action-badge__value">{lastAction.action_label}</span>
+          {agentCoord && (
+            <span className="action-badge__label">
+              Pos ({agentCoord.x}, {agentCoord.y})
+            </span>
+          )}
           <span className="action-badge__q">
             Q: [{lastAction.q_values?.map(v => v.toFixed(2)).join(', ')}]
           </span>
+          {lastAction.reached_goal && (
+            <span className="action-badge__value" style={{ color: '#4ade80' }}>🎉 Hedefe Ulaştı!</span>
+          )}
         </div>
       )}
 
@@ -366,8 +525,48 @@ export default function App() {
         <div className="legend-item"><span className="legend-dot legend-dot--goal"/>Hedef {goalCoord?`(${goalCoord.x},${goalCoord.y})`:'— seçilmedi'}</div>
         <div className="legend-item"><span className="legend-dot legend-dot--obstacle"/>Sabit Engel</div>
         <div className="legend-item"><span className="legend-dot legend-dot--dynamic"/>Hareketli Engel</div>
+        {agentCoord && (
+          <div className="legend-item"><span className="legend-dot legend-dot--agent"/>Ajan ({agentCoord.x},{agentCoord.y})</div>
+        )}
         <div className="legend-item legend-item--axis"><span className="legend-axis-icon">＋</span>Orijin (0,0)</div>
       </div>
+
+      {/* Episode sonu modal */}
+      {episodeEnd && (
+        <div className="episode-modal-overlay" onClick={() => setEpisodeEnd(null)}>
+          <div className="episode-modal" onClick={(e) => e.stopPropagation()}>
+            {episodeEnd === 'goal' ? (
+              <>
+                <h2 className="episode-modal__title" style={{ color: '#4ade80' }}>🎉 HEDEFE ULAŞTI!</h2>
+                <p className="episode-modal__text">Ajan başarıyla hedefe ulaştı!</p>
+              </>
+            ) : episodeEnd === 'stuck' ? (
+              <>
+                <h2 className="episode-modal__title" style={{ color: '#f59e0b' }}>⚠️ AJAN SALINIMDA SIKIŞTI!</h2>
+                <p className="episode-modal__text">Model bu konumda iki pozisyon arasında gidip geliyor. Başlangıç noktasını değiştir veya çevresine engel ekle.</p>
+              </>
+            ) : (
+              <>
+                <h2 className="episode-modal__title" style={{ color: '#ef4444' }}>❌ ENGELE ÇARPTI!</h2>
+                <p className="episode-modal__text">Ajan bir engele çarptı veya sınırı aştı.</p>
+              </>
+            )}
+            {lastAction && (
+              <div className="episode-modal__stats">
+                <p><strong>Episode:</strong> {lastAction.episode}</p>
+                <p><strong>Adım Sayısı:</strong> {lastAction.steps}</p>
+                <p><strong>Son Ödül:</strong> {lastAction.reward}</p>
+              </div>
+            )}
+            <button
+              className="episode-modal__btn"
+              onClick={() => reset()}
+            >
+              + Yeni Simülasyon Oluştur
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

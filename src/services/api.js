@@ -1,7 +1,8 @@
 // src/services/api.js
 // REST API — https://pointsense.onrender.com
 
-const BASE = import.meta.env.VITE_API_URL ?? 'https://pointsense.onrender.com';
+const BASE        = import.meta.env.VITE_API_URL    ?? 'https://pointsense.onrender.com';
+const PYTHON_BASE = import.meta.env.VITE_PYTHON_URL ?? 'http://localhost:8000';
 
 /**
  * Haritayı backend'e kaydeder.
@@ -15,6 +16,21 @@ export async function saveMap(mapPayload) {
     body: JSON.stringify(mapPayload),
   });
   if (!res.ok) throw new Error(`Harita kaydedilemedi: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Haritayı Python FastAPI modeline yükler (sim_env başlatma).
+ * buildGameMapDTO çıktısı Python MapPayload ile birebir uyumlu.
+ * @param {Object} mapPayload  — buildGameMapDTO ile üretilmiş obje
+ */
+export async function saveMapToPython(mapPayload) {
+  const res = await fetch(`${PYTHON_BASE}/maps/load`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(mapPayload),
+  });
+  if (!res.ok) throw new Error(`Python harita yüklenemedi: ${res.status}`);
   return res.json();
 }
 

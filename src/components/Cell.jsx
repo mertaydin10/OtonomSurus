@@ -1,7 +1,8 @@
 // src/components/Cell.jsx
 const STATE_ICONS = {
-  start:    '🤖',
-  goal:     '🎯',
+  start:    '🟢',   // başlangıç noktası
+  goal:     '🏁',   // hedef
+  agent:    '🤖',   // ajan (simülayon sırasında hareket eder)
   obstacle: '',
   dynamic:  '',
   empty:    '',
