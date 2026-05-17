@@ -1,7 +1,7 @@
 // src/hooks/useSimulation.js
 // WebSocket bağlantısı — wss://pointsense.onrender.com/ws/simulate
 
-import { useRef, useCallback, useState } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
 
 const WS_URL = import.meta.env.VITE_WS_URL ?? 'wss://pointsense.onrender.com/ws/simulate';
 
@@ -19,6 +19,20 @@ const WS_URL = import.meta.env.VITE_WS_URL ?? 'wss://pointsense.onrender.com/ws/
 export function useSimulation({ onResponse, onError }) {
   const wsRef = useRef(null);
   const [connected, setConnected] = useState(false);
+
+  // Stale closure'ları önlemek için callback'leri ref'lerde tutuyoruz.
+  // Bu sayede WebSocket bağlantısı açıkken React state'leri güncellense bile 
+  // ws.onmessage her zaman en güncel callback'i ve state'i çağırır.
+  const onResponseRef = useRef(onResponse);
+  const onErrorRef = useRef(onError);
+
+  useEffect(() => {
+    onResponseRef.current = onResponse;
+  }, [onResponse]);
+
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
 
   const connect = useCallback(() => {
     // Zaten bağlıysa tekrar bağlanma
@@ -39,22 +53,22 @@ export function useSimulation({ onResponse, onError }) {
 
     ws.onerror = (e) => {
       console.error('[WS] Hata:', e);
-      onError?.('WebSocket bağlantı hatası');
+      onErrorRef.current?.('WebSocket bağlantı hatası');
     };
 
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
         // Backend hata döndürdüyse
-        if (data.error) { onError?.(data.error); return; }
-        onResponse(data);
+        if (data.error) { onErrorRef.current?.(data.error); return; }
+        onResponseRef.current(data);
       } catch {
-        onError?.('Geçersiz sunucu yanıtı');
+        onErrorRef.current?.('Geçersiz sunucu yanıtı');
       }
     };
 
     wsRef.current = ws;
-  }, [onResponse, onError]);
+  }, []);
 
   const disconnect = useCallback(() => {
     wsRef.current?.close();

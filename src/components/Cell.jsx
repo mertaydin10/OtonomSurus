@@ -1,6 +1,7 @@
 // src/components/Cell.jsx
 const STATE_ICONS = {
-  start:    '🤖',
+  start:    '🏁',
+  agent:    '🤖',
   goal:     '🎯',
   obstacle: '',
   dynamic:  '',
@@ -11,8 +12,8 @@ const MODE_CURSOR = { obstacle: 'crosshair', dynamic: 'crosshair', start: 'cell'
 
 function Cell({ row, col, state, onClick, coord, isOrigin, isXAxis, isYAxis, activeMode }) {
   const handleClick = () => {
-    if (activeMode === 'start' && (state === 'goal'  || state === 'dynamic')) return;
-    if (activeMode === 'goal'  && (state === 'start' || state === 'dynamic')) return;
+    if (activeMode === 'start' && (state === 'goal'  || state === 'dynamic' || state === 'agent')) return;
+    if (activeMode === 'goal'  && (state === 'start' || state === 'dynamic' || state === 'agent')) return;
     onClick(row, col);
   };
 
@@ -23,7 +24,7 @@ function Cell({ row, col, state, onClick, coord, isOrigin, isXAxis, isYAxis, act
   else if (isXAxis) extraClass = ' cell--x-axis';
   else if (isYAxis) extraClass = ' cell--y-axis';
 
-  const cursor = (state === 'start' || state === 'goal')
+  const cursor = (state === 'start' || state === 'goal' || state === 'agent')
     ? (activeMode === 'obstacle' || activeMode === 'dynamic' ? 'not-allowed' : 'cell')
     : MODE_CURSOR[activeMode] || 'pointer';
 
