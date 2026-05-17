@@ -86,6 +86,46 @@ export default function App() {
   const [view3D,           setView3D]           = useState(false);
   const mapNameRef = useRef('harita1');
 
+  // 🤖 Yapay Zeka Model Seçici Durumları
+  const [availableModels, setAvailableModels] = useState([]);
+  const [activeModel, setActiveModel] = useState('');
+
+  // Mevcut modelleri backend'den çek
+  useEffect(() => {
+    fetch('http://localhost:8000/models')
+      .then(res => res.json())
+      .then(data => {
+        setAvailableModels(data.models);
+        setActiveModel(data.active_model);
+      })
+      .catch(err => console.error('[MODEL] Modeller yüklenemedi:', err));
+  }, []);
+
+  // Canlı model değişim tetikleyicisi
+  const handleModelChange = async (e) => {
+    const key = e.target.value;
+    if (!key) return;
+
+    try {
+      const res = await fetch('http://localhost:8000/model/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_key: key })
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        setActiveModel(data.active_model);
+        // Simülasyonu temiz bir şekilde durdur ve sıfırla
+        setIsTraining(false);
+        setLastAction(null);
+        disconnect();
+        console.log(`[MODEL] Başarıyla '${data.active_model}' modeline geçildi.`);
+      }
+    } catch (err) {
+      console.error('[MODEL] Model değiştirilemedi:', err);
+    }
+  };
+
   // Stale closures ve güvenli durdurma için refs
   const isTrainingRef = useRef(false);
   isTrainingRef.current = isTraining;
@@ -569,6 +609,40 @@ export default function App() {
             maxLength={32}
           />
         </div>
+        <div className="control-divider" />
+
+        {/* 🤖 Yapay Zeka Model Seçici (Dropdown) */}
+        <div className="control-group">
+          <label htmlFor="model-select" style={{ color: '#38bdf8', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            🤖 Beyin:
+          </label>
+          <select 
+            id="model-select" 
+            className="select-model btn btn-secondary" 
+            value={activeModel}
+            onChange={handleModelChange}
+            style={{
+              background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+              color: '#38bdf8',
+              border: '1px solid #0284c7',
+              boxShadow: '0 0 10px rgba(2, 132, 199, 0.2)',
+              borderRadius: '6px',
+              padding: '6px 10px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              fontFamily: 'monospace',
+              outline: 'none',
+              transition: 'all 0.3s'
+            }}
+          >
+            {availableModels.map(m => (
+              <option key={m.key} value={m.key} style={{ background: '#0f172a', color: '#fff' }}>
+                {m.type === 'PPO' ? '🔥 PPO' : '⚙️ DQN'} - {m.key.toUpperCase()}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="control-divider" />
 
         {/* Eğitimi Başlat / Durdur */}
         <div className="control-group">
