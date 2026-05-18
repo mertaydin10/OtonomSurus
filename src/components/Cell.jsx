@@ -3,17 +3,22 @@ const STATE_ICONS = {
   start:    '🏁',
   agent:    '🤖',
   goal:     '🎯',
+  waypoint: '📍',
+  'traffic-light-green': '🚦',
+  'traffic-light-red': '🚦',
   obstacle: '',
   dynamic:  '',
   empty:    '',
 };
 
-const MODE_CURSOR = { obstacle: 'crosshair', dynamic: 'crosshair', start: 'cell', goal: 'cell' };
+const MODE_CURSOR = { obstacle: 'crosshair', dynamic: 'crosshair', start: 'cell', goal: 'cell', waypoint: 'cell', 'traffic-light': 'cell' };
 
 function Cell({ row, col, state, onClick, coord, isOrigin, isXAxis, isYAxis, activeMode }) {
   const handleClick = () => {
-    if (activeMode === 'start' && (state === 'goal'  || state === 'dynamic' || state === 'agent')) return;
-    if (activeMode === 'goal'  && (state === 'start' || state === 'dynamic' || state === 'agent')) return;
+    if (activeMode === 'start'          && (state === 'goal'  || state === 'dynamic' || state === 'agent' || state === 'waypoint' || state.startsWith('traffic-light'))) return;
+    if (activeMode === 'goal'           && (state === 'start' || state === 'dynamic' || state === 'agent' || state === 'waypoint' || state.startsWith('traffic-light'))) return;
+    if (activeMode === 'waypoint'       && (state === 'start' || state === 'goal'    || state === 'dynamic' || state === 'agent' || state.startsWith('traffic-light'))) return;
+    if (activeMode === 'traffic-light'  && (state === 'start' || state === 'goal'    || state === 'dynamic' || state === 'agent' || state === 'waypoint')) return;
     onClick(row, col);
   };
 

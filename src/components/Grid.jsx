@@ -52,6 +52,8 @@ function Grid({ grid, onCellClick, size, center, indexToCoord, activeMode }) {
         {activeMode === 'obstacle' && 'Hücreye tıkla → Engel koy / kaldır'}
         {activeMode === 'start'    && 'Hücreye tıkla → Başlangıç konumunu seç'}
         {activeMode === 'goal'     && 'Hücreye tıkla → Hedef konumunu seç'}
+        {activeMode === 'waypoint' && 'Hücrelere tıkla → Birden fazla Durak (📍) ekle / kaldır'}
+        {activeMode === 'traffic-light' && 'Hücrelere tıkla → Trafik Işığı (🚦) ekle / kaldır'}
         &nbsp;·&nbsp; Koordinatlar: <strong>(x, y)</strong> — merkez (0, 0)
       </p>
     </div>

@@ -42,6 +42,80 @@ const Goal3D = ({ position }) => {
   );
 };
 
+// Havada Dönen Enerji Konisi (Uğrak Noktası / Durak)
+const Waypoint3D = ({ position }) => {
+  const groupRef = useRef();
+  const ringRef = useRef();
+
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime();
+    if (groupRef.current) {
+      groupRef.current.position.y = position[1] + Math.sin(t * 3.5) * 0.08 + 0.1;
+      groupRef.current.rotation.y = -t * 0.5;
+    }
+    if (ringRef.current) {
+      ringRef.current.rotation.z = t * 1.8;
+    }
+  });
+
+  return (
+    <group ref={groupRef} position={position}>
+      <mesh>
+        <coneGeometry args={[0.16, 0.35, 8]} />
+        <meshStandardMaterial 
+          color="#fbbf24" 
+          roughness={0.1} 
+          metalness={0.8}
+          emissive="#d97706"
+          emissiveIntensity={1.2}
+        />
+      </mesh>
+      <mesh ref={ringRef} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.26, 0.015, 6, 24]} />
+        <meshStandardMaterial color="#fbbf24" roughness={0.2} metalness={0.8} />
+      </mesh>
+    </group>
+  );
+};
+
+// Akıllı Parıldayan 3D Trafik Işığı Direği
+const TrafficLight3D = ({ position, isGreen }) => {
+  const lightRef = useRef();
+
+  useFrame(({ clock }) => {
+    if (lightRef.current) {
+      const t = clock.getElapsedTime();
+      lightRef.current.emissiveIntensity = 1.0 + Math.sin(t * 4) * 0.3;
+    }
+  });
+
+  return (
+    <group position={position}>
+      {/* İnce Metalik Direk */}
+      <mesh position={[0, 0.25, 0]}>
+        <cylinderGeometry args={[0.02, 0.02, 0.5, 8]} />
+        <meshStandardMaterial color="#334155" metalness={0.8} roughness={0.2} />
+      </mesh>
+      {/* Sinyal Lambası Gövdesi */}
+      <mesh position={[0, 0.5, 0]}>
+        <boxGeometry args={[0.1, 0.18, 0.1]} />
+        <meshStandardMaterial color="#1e293b" metalness={0.9} roughness={0.1} />
+      </mesh>
+      {/* Aktif Işık Haznesi */}
+      <mesh ref={lightRef} position={[0, 0.5, 0.05]}>
+        <sphereGeometry args={[0.04, 8, 8]} />
+        <meshStandardMaterial 
+          color={isGreen ? "#22c55e" : "#ef4444"} 
+          roughness={0.1}
+          metalness={0.1}
+          emissive={isGreen ? "#22c55e" : "#ef4444"}
+          emissiveIntensity={1.2}
+        />
+      </mesh>
+    </group>
+  );
+};
+
 // Otonom Akıllı Şehir Teslimat AGV'si (Ajan)
 const Agent3D = ({ position, lastAction }) => {
   const agentRef = useRef();
@@ -380,7 +454,7 @@ const CameraController = ({ cameraMode, agent3DPos, lastAction }) => {
 
 // ─── ANA 3D SIMÜLATÖR BİLEŞENİ ───
 
-export default function Simulation3D({ size, baseGrid, agentPos, goalPos, dynamicObstacles, lastAction }) {
+export default function Simulation3D({ size, baseGrid, agentPos, goalPos, waypoints = [], currentWaypointIndex = 0, trafficLights = [], lightsGreen = false, dynamicObstacles, lastAction }) {
   const [cameraMode, setCameraMode] = useState('orbit');
   const halfGrid = size / 2;
 
@@ -502,6 +576,22 @@ export default function Simulation3D({ size, baseGrid, agentPos, goalPos, dynami
   const goal3DPos = useMemo(() => {
     return goalPos ? to3DCoords(goalPos.row, goalPos.col, 0.15) : null;
   }, [goalPos, size]);
+
+  // Henüz ulaşılmamış duraklar (Waypoints) 3D Pozisyonları
+  const remainingWaypoints3D = useMemo(() => {
+    return waypoints.slice(currentWaypointIndex).map((w, idx) => ({
+      id: `wp-${idx}-${w.row}-${w.col}`,
+      pos: to3DCoords(w.row, w.col, 0.15)
+    }));
+  }, [waypoints, currentWaypointIndex, size]);
+
+  // Trafik Işıkları 3D Pozisyonları
+  const trafficLights3D = useMemo(() => {
+    return trafficLights.map((t, idx) => ({
+      id: `tl-${idx}-${t.row}-${t.col}`,
+      pos: to3DCoords(t.row, t.col, 0.0)
+    }));
+  }, [trafficLights, size]);
 
   // Dinamik Engellerin 3D Pozisyonları
   const dynObstacles3D = useMemo(() => {
@@ -660,6 +750,16 @@ export default function Simulation3D({ size, baseGrid, agentPos, goalPos, dynami
 
         {/* Hedef */}
         {goal3DPos && <Goal3D position={goal3DPos} />}
+
+        {/* Duraklar (Waypoints) */}
+        {remainingWaypoints3D.map(w => (
+          <Waypoint3D key={w.id} position={w.pos} />
+        ))}
+
+        {/* Trafik Işıkları */}
+        {trafficLights3D.map(t => (
+          <TrafficLight3D key={t.id} position={t.pos} isGreen={lightsGreen} />
+        ))}
 
         {/* Ajan (Siber Kamyon) */}
         {agent3DPos && <Agent3D position={agent3DPos} lastAction={lastAction} />}

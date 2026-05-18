@@ -16,6 +16,8 @@ const MODES = [
   { id: 'dynamic',  label: '🔮 Hareketli',  title: 'Hareketli engel ekle / kaldır' },
   { id: 'start',    label: '🟢 Başlangıç',  title: 'Başlangıç noktasını seç' },
   { id: 'goal',     label: '🟠 Hedef',       title: 'Hedef noktasını seç' },
+  { id: 'waypoint', label: '📍 Durak',       title: 'Uğranacak durak noktasını seç' },
+  { id: 'traffic-light', label: '🚦 Trafik Işığı', title: 'Trafik ışığı yerleştir / kaldır' },
 ];
 
 const PATTERNS = [
@@ -69,13 +71,25 @@ export default function App() {
   useEffect(() => {
     dynamicObstaclesRef.current = dynamicObstacles;
   }, [dynamicObstacles]);
+
+  // Trafik ışıklarının Kırmızı/Yeşil durumu 4 saniyede bir değişir
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setLightsGreen(prev => !prev);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, []);
   const [mode,             setMode]             = useState('obstacle');
   const [pattern,          setPattern]          = useState('linear-h');
-  const [startPos,         setStartPos]         = useState(null);
-  const [goalPos,          setGoalPos]          = useState(null);
-  const [agentPos,         setAgentPos]         = useState(null);
-  const [isMoving,         setIsMoving]         = useState(false);
-  const [simSpeed,         setSimSpeed]         = useState(450);
+  const [startPos,             setStartPos]             = useState(null);
+  const [goalPos,              setGoalPos]              = useState(null);
+  const [waypoints,            setWaypoints]            = useState([]);
+  const [currentWaypointIndex, setCurrentWaypointIndex] = useState(0);
+  const [trafficLights,        setTrafficLights]        = useState([]);
+  const [lightsGreen,          setLightsGreen]          = useState(true);
+  const [agentPos,             setAgentPos]             = useState(null);
+  const [isMoving,             setIsMoving]             = useState(false);
+  const [simSpeed,             setSimSpeed]             = useState(450);
 
   /* ── Backend eğitim durumu ── */
   const [isSaving,         setIsSaving]         = useState(false);
@@ -129,6 +143,15 @@ export default function App() {
   // Stale closures ve güvenli durdurma için refs
   const isTrainingRef = useRef(false);
   isTrainingRef.current = isTraining;
+
+  const currentWaypointIndexRef = useRef(0);
+  currentWaypointIndexRef.current = currentWaypointIndex;
+
+  const lightsGreenRef = useRef(true);
+  lightsGreenRef.current = lightsGreen;
+
+  const trafficLightsRef = useRef([]);
+  trafficLightsRef.current = trafficLights;
 
   /* ─── Dinamik engellerin bir sonraki adımını hesaplayan senkronize yardımcı fonksiyon ─── */
   const getNextDynamicObstacles = useCallback((prev) => {
@@ -200,32 +223,75 @@ export default function App() {
           setTimeout(() => {
             if (!isTrainingRef.current) return;
 
-            if (res.done) {
-              // Hedefe ulaşıldı veya çarpışma oldu -> Eğitimi bitir
-              setIsTraining(false);
-              disconnect();
-              setSaveStatus('done'); // Kullanıcıya bittiğini göstermek için
-              setModalState({
-                show: true,
-                type: res.reached_goal ? 'success' : 'fail'
-              });
+            // Anlık aktif hedefi bul (sıradaki durak veya nihai hedef)
+            const activeTarget = (waypoints.length > 0 && currentWaypointIndexRef.current < waypoints.length)
+              ? waypoints[currentWaypointIndexRef.current]
+              : goalPos;
+
+            const reachedTarget = nextPos.row === activeTarget.row && nextPos.col === activeTarget.col;
+
+            if (res.done || reachedTarget) {
+              // Eğer bir durağa (waypoint) ulaştıysak:
+              if (waypoints.length > 0 && currentWaypointIndexRef.current < waypoints.length && reachedTarget) {
+                console.log(`[WAYPOINT] Durak ${currentWaypointIndexRef.current + 1}'e ulaşıldı! Bir sonraki hedefe yönleniliyor...`);
+                
+                const nextIndex = currentWaypointIndexRef.current + 1;
+                setCurrentWaypointIndex(nextIndex);
+                currentWaypointIndexRef.current = nextIndex;
+
+                const nextActiveTarget = (nextIndex < waypoints.length) ? waypoints[nextIndex] : goalPos;
+
+                // Ajan adımıyla tam senkronize şekilde hareketli engelleri 1 adım ilerlet
+                const calculatedNextDyn = getNextDynamicObstacles(dynamicObstaclesRef.current);
+                updateDynamicObstacles(calculatedNextDyn);
+
+                // Ortamı yeni start/goal ve güncel trafik ışıklarıyla sıfırlamak için grid payload ile yeni Phase başlat
+                sendTick({
+                  map_name: mapNameRef.current,
+                  is_first_tick: true,
+                  agent_pos: indexToCoord(nextPos.row, nextPos.col, size),
+                  goal_pos: indexToCoord(nextActiveTarget.row, nextActiveTarget.col, size),
+                  dynamic_obstacles: calculatedNextDyn.map(o => indexToCoord(o.row, o.col, size)),
+                  grid: baseGrid.map((r, rIdx) => r.map((c, cIdx) => {
+                    if (c === 'obstacle') return 1;
+                    const isRedLight = trafficLightsRef.current.some(t => t.row === rIdx && t.col === cIdx) && !lightsGreenRef.current;
+                    if (isRedLight) return 1;
+                    return 0;
+                  }))
+                });
+              } else {
+                // Ana hedefe ulaşıldı veya çarpışma oldu -> Simülasyonu bitir
+                setIsTraining(false);
+                disconnect();
+                setSaveStatus('done');
+                setModalState({
+                  show: true,
+                  type: res.reached_goal ? 'success' : 'fail'
+                });
+              }
             } else {
               // Ajan adımıyla tam senkronize şekilde hareketli engelleri 1 adım ilerlet
               const calculatedNextDyn = getNextDynamicObstacles(dynamicObstaclesRef.current);
               updateDynamicObstacles(calculatedNextDyn);
 
-              // Simülasyonu devam ettir (hesaplanan yeni konumları gönderiyoruz)
+              // Simülasyonu devam ettir. Her adımda trafik ışığı durumunu ve engelleri göndermek için grid'i de gönderiyoruz!
               sendTick({
                 map_name: mapNameRef.current,
                 agent_pos: indexToCoord(nextPos.row, nextPos.col, size),
-                goal_pos: indexToCoord(goalPos.row, goalPos.col, size),
-                dynamic_obstacles: calculatedNextDyn.map(o => indexToCoord(o.row, o.col, size))
+                goal_pos: indexToCoord(activeTarget.row, activeTarget.col, size),
+                dynamic_obstacles: calculatedNextDyn.map(o => indexToCoord(o.row, o.col, size)),
+                grid: baseGrid.map((r, rIdx) => r.map((c, cIdx) => {
+                  if (c === 'obstacle') return 1;
+                  const isRedLight = trafficLightsRef.current.some(t => t.row === rIdx && t.col === cIdx) && !lightsGreenRef.current;
+                  if (isRedLight) return 1;
+                  return 0;
+                }))
               });
             }
           }, simSpeed);
         }
       }
-    }, [size, startPos, goalPos, simSpeed, baseGrid, getNextDynamicObstacles, updateDynamicObstacles]),
+    }, [size, startPos, goalPos, waypoints, simSpeed, baseGrid, getNextDynamicObstacles, updateDynamicObstacles]),
     onError: useCallback((msg) => {
       console.error('[SIM] Hata:', msg);
       setSaveStatus('error');
@@ -237,27 +303,46 @@ export default function App() {
     if (connected && isTraining && startPos && goalPos) {
       setAgentPos(startPos);
       console.log('[SIM] Simülasyon başlatılıyor, ilk adım gönderiliyor...');
+      const activeTarget = (waypoints.length > 0 && currentWaypointIndexRef.current < waypoints.length) ? waypoints[currentWaypointIndexRef.current] : goalPos;
       sendTick({
         map_name: mapNameRef.current,
+        is_first_tick: true,
         agent_pos: indexToCoord(startPos.row, startPos.col, size),
-        goal_pos: indexToCoord(goalPos.row, goalPos.col, size),
+        goal_pos: indexToCoord(activeTarget.row, activeTarget.col, size),
         dynamic_obstacles: dynamicObstaclesRef.current.map(o => indexToCoord(o.row, o.col, size)),
-        grid: baseGrid.map(r => r.map(c => c === 'obstacle' ? 1 : 0))
+        grid: baseGrid.map((r, rIdx) => r.map((c, cIdx) => {
+          if (c === 'obstacle') return 1;
+          const isRedLight = trafficLightsRef.current.some(t => t.row === rIdx && t.col === cIdx) && !lightsGreenRef.current;
+          if (isRedLight) return 1;
+          return 0;
+        }))
       });
     } else if (!connected) {
       setAgentPos(null);
     }
-  }, [connected, isTraining, startPos, goalPos, size, baseGrid, sendTick]);
+  }, [connected, isTraining, startPos, goalPos, waypoints, size, baseGrid, sendTick]);
 
   /* Görüntüleme gridi */
   const displayGrid = useMemo(() => {
     const dg = baseGrid.map(r => [...r]);
+
+    // Trafik ışıklarını ekle
+    trafficLights.forEach(t => {
+      dg[t.row][t.col] = lightsGreen ? 'traffic-light-green' : 'traffic-light-red';
+    });
+
+    // Henüz ulaşılmamış tüm durakları çiz
+    waypoints.slice(currentWaypointIndex).forEach(w => {
+      dg[w.row][w.col] = 'waypoint';
+    });
+
     dynamicObstacles.forEach(o => { dg[o.row][o.col] = 'dynamic'; });
+
     if (agentPos) {
       dg[agentPos.row][agentPos.col] = 'agent';
     }
     return dg;
-  }, [baseGrid, dynamicObstacles, agentPos]);
+  }, [baseGrid, dynamicObstacles, agentPos, waypoints, currentWaypointIndex, trafficLights, lightsGreen]);
 
   /* ─── Yerel hareket tiki (dinamik engeller için) ─── */
   const tick = useCallback(() => {
@@ -292,7 +377,7 @@ export default function App() {
       setStartPos({ row, col });
       setAgentPos({ row, col });
     } else if (mode === 'goal') {
-      if (cell === 'start' || cell === 'dynamic') return;
+      if (cell === 'start' || cell === 'dynamic' || cell === 'waypoint') return;
       setBaseGrid(prev => {
         const ng = prev.map(r => [...r]);
         if (goalPos) ng[goalPos.row][goalPos.col] = 'empty';
@@ -300,14 +385,33 @@ export default function App() {
         return ng;
       });
       setGoalPos({ row, col });
+    } else if (mode === 'waypoint') {
+      if (cell === 'start' || cell === 'goal' || cell === 'dynamic' || cell === 'traffic-light') return;
+      const exists = waypoints.some(w => w.row === row && w.col === col);
+      if (exists) {
+        setWaypoints(prev => prev.filter(w => !(w.row === row && w.col === col)));
+      } else {
+        setWaypoints(prev => [...prev, { row, col }]);
+      }
+      setCurrentWaypointIndex(0);
+    } else if (mode === 'traffic-light') {
+      if (cell === 'start' || cell === 'goal' || cell === 'dynamic' || cell === 'waypoint') return;
+      const exists = trafficLights.some(t => t.row === row && t.col === col);
+      if (exists) {
+        setTrafficLights(prev => prev.filter(t => !(t.row === row && t.col === col)));
+      } else {
+        setTrafficLights(prev => [...prev, { row, col }]);
+      }
     }
-  }, [mode, pattern, displayGrid, dynamicObstacles, startPos, goalPos]);
+  }, [mode, pattern, displayGrid, dynamicObstacles, startPos, goalPos, waypoints, trafficLights]);
 
   /* ─── Kontroller ─── */
   const handleSizeChange = (e) => {
     const s = Number(e.target.value);
     setSize(s); setBaseGrid(createEmptyGrid(s));
-    setDynamicObstacles([]); setStartPos(null); setGoalPos(null); setAgentPos(null);
+    setDynamicObstacles([]); setStartPos(null); setGoalPos(null);
+    setWaypoints([]); setCurrentWaypointIndex(0); setTrafficLights([]);
+    setAgentPos(null);
     setIsMoving(false); setIsTraining(false); setLastAction(null);
     disconnect();
   };
@@ -316,7 +420,9 @@ export default function App() {
   const clearDynamic = () => { setDynamicObstacles([]); setIsMoving(false); };
   const reset        = () => {
     setBaseGrid(createEmptyGrid(size)); setDynamicObstacles([]);
-    setStartPos(null); setGoalPos(null); setAgentPos(null); setIsMoving(false);
+    setStartPos(null); setGoalPos(null);
+    setWaypoints([]); setCurrentWaypointIndex(0); setTrafficLights([]);
+    setAgentPos(null); setIsMoving(false);
     setIsTraining(false); setLastAction(null); setSaveStatus(null);
     disconnect();
   };
@@ -445,6 +551,10 @@ export default function App() {
 
       await saveMap(payload);
       setSaveStatus('ok');
+
+      // Eğitim başlamadan önce durak durumlarını sıfırla
+      setCurrentWaypointIndex(0);
+      currentWaypointIndexRef.current = 0;
 
       // Harita kaydedildikten sonra WebSocket bağlantısı kur
       connect();
@@ -688,6 +798,10 @@ export default function App() {
           baseGrid={baseGrid} 
           agentPos={agentPos} 
           goalPos={goalPos} 
+          waypoints={waypoints}
+          currentWaypointIndex={currentWaypointIndex}
+          trafficLights={trafficLights}
+          lightsGreen={lightsGreen}
           dynamicObstacles={dynamicObstacles} 
           lastAction={lastAction} 
         />
@@ -699,6 +813,8 @@ export default function App() {
       <div className="legend" role="list">
         <div className="legend-item"><span className="legend-dot legend-dot--start"/>Başlangıç {startCoord?`(${startCoord.x},${startCoord.y})`:'— seçilmedi'}</div>
         <div className="legend-item"><span className="legend-dot legend-dot--agent"/>Yapay Zeka (Ajan)</div>
+        <div className="legend-item"><span className="legend-dot" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', width: '12px', height: '12px' }}>📍</span>Duraklar {waypoints.length > 0 ? waypoints.map(w => { const c = indexToCoord(w.row, w.col, size); return `(${c.x},${c.y})`; }).join(', ') : '— seçilmedi'}</div>
+        <div className="legend-item"><span className="legend-dot" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', width: '12px', height: '12px' }}>🚦</span>Trafik Işıkları ({lightsGreen ? '🟩 YEŞİL' : '🟥 KIRMIZI'})</div>
         <div className="legend-item"><span className="legend-dot legend-dot--goal"/>Hedef {goalCoord?`(${goalCoord.x},${goalCoord.y})`:'— seçilmedi'}</div>
         <div className="legend-item"><span className="legend-dot legend-dot--obstacle"/>Sabit Engel</div>
         <div className="legend-item"><span className="legend-dot legend-dot--dynamic"/>Hareketli Engel</div>
