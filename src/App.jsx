@@ -153,6 +153,9 @@ export default function App() {
   const trafficLightsRef = useRef([]);
   trafficLightsRef.current = trafficLights;
 
+  const activeModelRef = useRef('');
+  activeModelRef.current = activeModel;
+
   /* ─── Dinamik engellerin bir sonraki adımını hesaplayan senkronize yardımcı fonksiyon ─── */
   const getNextDynamicObstacles = useCallback((prev) => {
     const isStaticBlocked = (r, c) =>
@@ -804,6 +807,7 @@ export default function App() {
           lightsGreen={lightsGreen}
           dynamicObstacles={dynamicObstacles} 
           lastAction={lastAction} 
+          simSpeed={simSpeed}
         />
       ) : (
         <Grid grid={displayGrid} onCellClick={handleCellClick}

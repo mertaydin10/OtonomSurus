@@ -1,7 +1,8 @@
 // src/components/Simulation3D.jsx
-import React, { useRef, useMemo, useState } from 'react';
+import React, { useRef, useMemo, useState, Suspense } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Sky } from '@react-three/drei';
+import { OrbitControls, Sky, useGLTF } from '@react-three/drei';
+import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
 
 // ─── PROCEDURAL TEXTURE GENERATORS (HIGH REALISM) ───
@@ -142,47 +143,140 @@ const Goal3D = ({ position }) => {
           </mesh>
         ))}
       </group>
+
+      {/* Tall glowing golden laser beam cutting straight into the clouds! */}
+      <mesh position={[0, 15, 0]}>
+        <cylinderGeometry args={[0.03, 0.03, 30, 8, 1, true]} />
+        <meshBasicMaterial
+          color="#ffcc00"
+          transparent
+          opacity={0.3}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </mesh>
+    </group>
+  );
+};
+
+// Realistic Episode Starting Point Marker
+const StartPoint3D = ({ position }) => {
+  return (
+    <group position={position}>
+      {/* Flat blue glowing circle on the ground */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
+        <ringGeometry args={[0.3, 0.35, 32]} />
+        <meshBasicMaterial color="#00ffff" transparent opacity={0.8} />
+      </mesh>
+      
+      {/* Start pad tile */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, 0]}>
+        <circleGeometry args={[0.28, 32]} />
+        <meshBasicMaterial color="#0080ff" transparent opacity={0.3} />
+      </mesh>
+      
+      {/* Tall glowing vertical electric cyan laser beam going straight to the sky! */}
+      <mesh position={[0, 15, 0]}>
+        <cylinderGeometry args={[0.03, 0.03, 30, 8, 1, true]} />
+        <meshBasicMaterial
+          color="#00ffff"
+          transparent
+          opacity={0.3}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </mesh>
     </group>
   );
 };
 
 // Realistic Waypoint (Floating Orange Traffic Cone / Checkpoint)
 const Waypoint3D = ({ position }) => {
-  const coneRef = useRef();
+  const markerRef = useRef();
 
   useFrame(({ clock }) => {
-    if (coneRef.current) {
-      coneRef.current.position.y = position[1] + 0.3 + Math.sin(clock.getElapsedTime() * 3.5) * 0.06;
-      coneRef.current.rotation.y = clock.getElapsedTime() * 1.0;
+    if (markerRef.current) {
+      // Floating glowing holographic bus indicator
+      markerRef.current.position.y = 0.72 + Math.sin(clock.getElapsedTime() * 3.5) * 0.04;
+      markerRef.current.rotation.y = clock.getElapsedTime() * 1.5;
     }
   });
 
   return (
     <group position={position}>
-      {/* Checkpoint base ring */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
-        <ringGeometry args={[0.22, 0.25, 24]} />
-        <meshBasicMaterial color="#dd6b20" transparent opacity={0.5} />
+      {/* 1. Stop Platform concrete pad */}
+      <mesh position={[0, 0.01, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.55, 0.02, 0.75]} />
+        <meshStandardMaterial color="#4a5568" roughness={0.8} />
       </mesh>
 
-      {/* Floating Checkpoint Cone */}
-      <group ref={coneRef}>
-        {/* Cone Base */}
-        <mesh position={[0, 0, 0]} castShadow>
-          <boxGeometry args={[0.2, 0.02, 0.2]} />
-          <meshStandardMaterial color="#dd6b20" roughness={0.4} />
+      {/* 2. Concrete/Metallic pillars */}
+      {[-0.24, 0.24].map((z, idx) => (
+        <mesh key={idx} position={[-0.20, 0.22, z]} castShadow>
+          <cylinderGeometry args={[0.016, 0.016, 0.44, 8]} />
+          <meshStandardMaterial color="#cbd5e0" metalness={0.8} roughness={0.2} />
         </mesh>
-        {/* Cone Body */}
-        <mesh position={[0, 0.14, 0]} castShadow>
-          <coneGeometry args={[0.07, 0.28, 12]} />
-          <meshStandardMaterial color="#dd6b20" roughness={0.4} />
+      ))}
+
+      {/* 3. Sleek Translucent Glass back wall pane */}
+      <mesh position={[-0.20, 0.22, 0]} castShadow>
+        <boxGeometry args={[0.01, 0.38, 0.46]} />
+        <meshStandardMaterial color="#4fd1c5" opacity={0.35} transparent roughness={0.05} metalness={0.9} />
+      </mesh>
+
+      {/* 4. Bench for waiting passengers */}
+      <mesh position={[-0.06, 0.10, 0]} castShadow>
+        <boxGeometry args={[0.14, 0.02, 0.38]} />
+        <meshStandardMaterial color="#ecc94b" roughness={0.5} />
+      </mesh>
+      {[-0.14, 0.14].map((z, idx) => (
+        <mesh key={idx} position={[-0.06, 0.05, z]} castShadow>
+          <boxGeometry args={[0.12, 0.10, 0.02]} />
+          <meshStandardMaterial color="#1a202c" />
         </mesh>
-        {/* Cone White Stripe */}
-        <mesh position={[0, 0.12, 0]} castShadow>
-          <cylinderGeometry args={[0.045, 0.052, 0.08, 12]} />
-          <meshStandardMaterial color="#ffffff" roughness={0.5} />
+      ))}
+
+      {/* 5. Futuristic curved shelter roof */}
+      <mesh position={[-0.05, 0.44, 0]} castShadow>
+        <boxGeometry args={[0.42, 0.02, 0.70]} />
+        <meshStandardMaterial color="#2d3748" metalness={0.6} roughness={0.3} />
+      </mesh>
+
+      {/* 6. Glowing LED Route Sign Board */}
+      <mesh position={[0.20, 0.24, 0.28]} castShadow>
+        <boxGeometry args={[0.04, 0.36, 0.12]} />
+        <meshStandardMaterial color="#2d3748" />
+      </mesh>
+      <mesh position={[0.178, 0.24, 0.28]}>
+        <planeGeometry args={[0.10, 0.32]} />
+        <meshStandardMaterial color="#ecc94b" emissive="#ecc94b" emissiveIntensity={0.8} />
+      </mesh>
+
+      {/* 7. Floating Glowing holographic indicator sign on top */}
+      <group ref={markerRef} position={[0, 0.72, 0]}>
+        {/* Floating Ring */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[0.08, 0.10, 16]} />
+          <meshBasicMaterial color="#4fd1c5" transparent opacity={0.6} />
+        </mesh>
+        {/* Central Stop Icon */}
+        <mesh>
+          <boxGeometry args={[0.02, 0.08, 0.06]} />
+          <meshBasicMaterial color="#319795" />
         </mesh>
       </group>
+
+      {/* Tall glowing emerald green laser beam cutting straight into the clouds! */}
+      <mesh position={[0, 15, 0]}>
+        <cylinderGeometry args={[0.03, 0.03, 30, 8, 1, true]} />
+        <meshBasicMaterial
+          color="#00ff66"
+          transparent
+          opacity={0.25}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </mesh>
     </group>
   );
 };
@@ -245,143 +339,158 @@ const TrafficLight3D = ({ position, isGreen }) => {
 };
 
 // Realistic Cyber Truck / AGV (Silver metallic body, rotating wheels)
-const Agent3D = ({ position, lastAction }) => {
+// Realistic Futuristic City Shuttle Bus / Real GLTF Supercar with Active Suspension
+const Agent3D = ({ position, lastAction, smoothCarPosRef, simSpeed = 450 }) => {
   const agentRef = useRef();
-  const frontLeftWheelRef = useRef();
-  const frontRightWheelRef = useRef();
-  const rearLeftWheelRef = useRef();
-  const rearRightWheelRef = useRef();
+  
+  // Dynamic GLTF 3D model loading via Drei hook (Ferrari GLB)
+  const { scene } = useGLTF('https://cdn.jsdelivr.net/gh/mrdoob/three.js@dev/examples/models/gltf/ferrari.glb');
+  
+  // Ref to hold the latest position prop to prevent stale closures inside useFrame
+  const positionRef = useRef(position);
+  positionRef.current = position;
 
-  const rotationY = useMemo(() => {
-    if (!lastAction) return 0;
+  React.useEffect(() => {
+    console.log("[DEBUG] Agent3D mounted!");
+    return () => console.log("[DEBUG] Agent3D UNMOUNTED!");
+  }, []);
+  
+  const targetAngleRef = useRef(0);
+  const currentAngleRef = useRef(0);
+  const currentPosRef = useRef(new THREE.Vector3());
+  const prevPosRef = useRef(new THREE.Vector3());
+  
+  // Physics Spring-Damper & Body Lean state variables
+  const velocityRef = useRef(new THREE.Vector3());
+  const pitchRef = useRef(0);
+  const rollRef = useRef(0);
+
+  // Wheel meshes refs extracted dynamically from the loaded GLTF model
+  const wheelsRef = useRef([]);
+
+  // Setup the GLTF model options and extract wheels on load
+  const modelScene = useMemo(() => {
+    const clone = scene.clone();
+    wheelsRef.current = [];
+    clone.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+        // Identify wheels for real-time rotation
+        if (child.name.toLowerCase().includes('wheel')) {
+          wheelsRef.current.push(child);
+        }
+      }
+    });
+    return clone;
+  }, [scene]);
+
+  // Update target angle when a direction change occurs
+  if (lastAction) {
     switch (lastAction.action_label) {
-      case 'UP': return 0;              // North (-Z)
-      case 'DOWN': return Math.PI;        // South (+Z)
-      case 'LEFT': return Math.PI / 2;    // West (-X)
-      case 'RIGHT': return -Math.PI / 2;   // East (+X)
-      default: return 0;
+      case 'UP': targetAngleRef.current = 0; break;
+      case 'DOWN': targetAngleRef.current = Math.PI; break;
+      case 'LEFT': targetAngleRef.current = Math.PI / 2; break;
+      case 'RIGHT': targetAngleRef.current = -Math.PI / 2; break;
     }
-  }, [lastAction]);
+  }
 
-  useFrame(({ clock }) => {
-    const t = clock.getElapsedTime();
-    // Simulate wheel rotation based on time (ticks)
-    const wheelRot = t * 9;
-    if (frontLeftWheelRef.current) frontLeftWheelRef.current.rotation.x = wheelRot;
-    if (frontRightWheelRef.current) frontRightWheelRef.current.rotation.x = wheelRot;
-    if (rearLeftWheelRef.current) rearLeftWheelRef.current.rotation.x = wheelRot;
-    if (rearRightWheelRef.current) rearRightWheelRef.current.rotation.x = wheelRot;
+  useFrame((state, delta) => {
+    // Smoothly interpolate car rotation (frame-rate independent angular lerp)
+    let diff = targetAngleRef.current - currentAngleRef.current;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    currentAngleRef.current += diff * Math.min(delta * 12.0, 1.0);
+    
+    // --- FOOLPROOF TIME-SMOOTHED POSITION INTERPOLATION ---
+    const tx = positionRef.current[0];
+    const ty = positionRef.current[1];
+    const tz = positionRef.current[2];
+    
+    // Scale LERP speed dynamically using simSpeed prop (decision cycle timing)
+    // simSpeed: 180 (Fast) -> lerp = 8.3 | 450 (Med) -> lerp = 3.3 | 900 (Slow) -> lerp = 1.6
+    const lerpSpeed = Math.max(1.6, Math.min(10.0, 1500 / simSpeed));
+    
+    // Smoothly ease current position coordinates towards target
+    currentPosRef.current.x += (tx - currentPosRef.current.x) * Math.min(delta * lerpSpeed, 1.0);
+    currentPosRef.current.y += (ty - currentPosRef.current.y) * Math.min(delta * lerpSpeed, 1.0);
+    currentPosRef.current.z += (tz - currentPosRef.current.z) * Math.min(delta * lerpSpeed, 1.0);
+    
+    // Sync the actual smooth car position to the shared camera ref
+    if (smoothCarPosRef) {
+      smoothCarPosRef.current.copy(currentPosRef.current);
+    }
+    
+    // Simple, reliable wheel rolling rotation based on movement speed
+    const forwardX = -Math.sin(currentAngleRef.current);
+    const forwardZ = -Math.cos(currentAngleRef.current);
+    
+    const rotAmount = 4.5 * delta * 5.0;
+    wheelsRef.current.forEach((wheel) => {
+      wheel.rotation.x += rotAmount;
+    });
+
+    // Simple, elegant cornering tilt (suspension lean)
+    let targetRoll = 0;
+    if (lastAction) {
+      if (lastAction.action_label === 'LEFT') targetRoll = 0.04;
+      if (lastAction.action_label === 'RIGHT') targetRoll = -0.04;
+    }
+    rollRef.current += (targetRoll - rollRef.current) * Math.min(delta * 8.0, 1.0);
+    pitchRef.current += (0.0 - pitchRef.current) * Math.min(delta * 8.0, 1.0);
+
+    if (agentRef.current) {
+      agentRef.current.rotation.y = currentAngleRef.current;
+      agentRef.current.position.copy(currentPosRef.current);
+    }
   });
 
   return (
-    <group ref={agentRef} position={position} rotation={[0, rotationY, 0]}>
-
-      {/* 1. Vibrant Lime Green Metallic Body */}
-      <mesh castShadow receiveShadow position={[0, 0.12, 0]}>
-        <boxGeometry args={[0.62, 0.14, 0.82]} />
-        <meshStandardMaterial color="#9bff05ff" roughness={0.15} metalness={0.8} />
+    <group ref={agentRef}>
+      {/* Neon Underglow (Cyan/Blue futuristic glow - stays flat on the asphalt) */}
+      <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[0.55, 0.78]} />
+        <meshBasicMaterial color="#00ffff" transparent opacity={0.35} />
+      </mesh>
+      
+      {/* Volumetric Underglow Halo (Three.js Additive Blending overlay for deep siber bloom!) */}
+      <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[0.62, 0.88]} />
+        <meshBasicMaterial color="#00ffff" transparent opacity={0.14} blending={THREE.AdditiveBlending} />
       </mesh>
 
-      {/* Sporty Racing Stripe (Matte Black) down the hood & tail */}
-      <mesh position={[0, 0.191, 0]} castShadow>
-        <boxGeometry args={[0.12, 0.002, 0.822]} />
-        <meshStandardMaterial color="#1a202c" roughness={0.85} />
-      </mesh>
+      {/* Dynamic Tilting Chassis & Cabin (Visual momentum suspension) */}
+      <group rotation={[pitchRef.current, 0, rollRef.current]}>
+        {/* High-Fidelity Supercar GLTF Primitive (Facing forward at rotation Y = 0) */}
+        <primitive object={modelScene} scale={0.32} rotation={[0, 0, 0]} position={[0, -0.015, 0]} />
 
-      {/* 2. Sleek Slanted Roof cabin */}
-      <mesh position={[0, 0.25, -0.05]} castShadow>
-        <boxGeometry args={[0.52, 0.14, 0.54]} />
-        <meshStandardMaterial color="#4a5568" roughness={0.15} metalness={0.6} />
-      </mesh>
+        {/* Dynamic Road Illumination Headlight (Fires forward from the front) */}
+        <pointLight
+          position={[0, 0.12, -0.45]}
+          intensity={1.8}
+          distance={4.0}
+          color="#fffaed"
+        />
 
-      {/* Windows (Dark glass panes) */}
-      <mesh position={[0, 0.25, -0.05]}>
-        <boxGeometry args={[0.526, 0.13, 0.53]} />
-        <meshStandardMaterial color="#1a202c" roughness={0.0} metalness={1.0} />
-      </mesh>
+        {/* Glowing Headlight Bulbs (Fitted at the actual front nose Z = -0.45) */}
+        {[-0.18, 0.18].map((x, idx) => (
+          <group key={idx} position={[x, 0.10, -0.45]}>
+            <mesh castShadow={false}>
+              <sphereGeometry args={[0.03, 8, 8]} />
+              <meshBasicMaterial color="#ffffff" transparent opacity={0.8} />
+            </mesh>
+          </group>
+        ))}
 
-      {/* Front Windshield slant */}
-      <mesh position={[0, 0.21, -0.28]} rotation={[-0.45, 0, 0]} castShadow>
-        <boxGeometry args={[0.52, 0.04, 0.24]} />
-        <meshStandardMaterial color="#1a202c" roughness={0.0} metalness={1.0} />
-      </mesh>
-
-      {/* Black Wheel Fenders */}
-      {[-0.32, 0.32].map((x, i) =>
-        [-0.20, 0.20].map((z, j) => (
-          <mesh key={`${i}-${j}`} position={[x, 0.08, z]} castShadow>
-            <boxGeometry args={[0.04, 0.12, 0.22]} />
-            <meshStandardMaterial color="#1a202c" roughness={0.7} />
-          </mesh>
-        ))
-      )}
-
-      {/* Bright Headlights */}
-      {[-0.22, 0.22].map((x, idx) => (
-        <mesh key={idx} position={[x, 0.13, -0.425]}>
-          <boxGeometry args={[0.06, 0.02, 0.015]} />
-          <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={2.0} />
-        </mesh>
-      ))}
-
-      {/* Red Tail Brake Lights */}
-      {[-0.22, 0.22].map((x, idx) => (
-        <mesh key={idx} position={[x, 0.13, 0.425]}>
-          <boxGeometry args={[0.06, 0.02, 0.015]} />
-          <meshStandardMaterial color="#e53e3e" emissive="#e53e3e" emissiveIntensity={1.5} />
-        </mesh>
-      ))}
-
-      {/* Heavy Rubber Tires with silver rims */}
-
-      {/* Front Left */}
-      <group position={[-0.33, 0.03, -0.20]}>
-        <mesh ref={frontLeftWheelRef} rotation={[0, 0, Math.PI / 2]} castShadow>
-          <cylinderGeometry args={[0.125, 0.125, 0.06, 16]} />
-          <meshStandardMaterial color="#1a202c" roughness={0.9} />
-        </mesh>
-        <mesh rotation={[0, 0, Math.PI / 2]}>
-          <cylinderGeometry args={[0.06, 0.06, 0.065, 8]} />
-          <meshStandardMaterial color="#a0aec0" metalness={0.7} roughness={0.3} />
-        </mesh>
+        {/* Red Glowing Tail Lights (Fitted at the actual rear Z = 0.45) */}
+        {[-0.18, 0.18].map((x, idx) => (
+          <group key={idx} position={[x, 0.12, 0.45]}>
+            <mesh castShadow={false}>
+              <sphereGeometry args={[0.025, 8, 8]} />
+              <meshBasicMaterial color="#ff3b30" />
+            </mesh>
+          </group>
+        ))}
       </group>
-
-      {/* Front Right */}
-      <group position={[0.33, 0.03, -0.20]}>
-        <mesh ref={frontRightWheelRef} rotation={[0, 0, Math.PI / 2]} castShadow>
-          <cylinderGeometry args={[0.125, 0.125, 0.06, 16]} />
-          <meshStandardMaterial color="#1a202c" roughness={0.9} />
-        </mesh>
-        <mesh rotation={[0, 0, Math.PI / 2]}>
-          <cylinderGeometry args={[0.06, 0.06, 0.065, 8]} />
-          <meshStandardMaterial color="#a0aec0" metalness={0.7} roughness={0.3} />
-        </mesh>
-      </group>
-
-      {/* Rear Left */}
-      <group position={[-0.33, 0.03, 0.20]}>
-        <mesh ref={rearLeftWheelRef} rotation={[0, 0, Math.PI / 2]} castShadow>
-          <cylinderGeometry args={[0.125, 0.125, 0.06, 16]} />
-          <meshStandardMaterial color="#1a202c" roughness={0.9} />
-        </mesh>
-        <mesh rotation={[0, 0, Math.PI / 2]}>
-          <cylinderGeometry args={[0.06, 0.06, 0.065, 8]} />
-          <meshStandardMaterial color="#a0aec0" metalness={0.7} roughness={0.3} />
-        </mesh>
-      </group>
-
-      {/* Rear Right */}
-      <group position={[0.33, 0.03, 0.20]}>
-        <mesh ref={rearRightWheelRef} rotation={[0, 0, Math.PI / 2]} castShadow>
-          <cylinderGeometry args={[0.125, 0.125, 0.06, 16]} />
-          <meshStandardMaterial color="#1a202c" roughness={0.9} />
-        </mesh>
-        <mesh rotation={[0, 0, Math.PI / 2]}>
-          <cylinderGeometry args={[0.06, 0.06, 0.065, 8]} />
-          <meshStandardMaterial color="#a0aec0" metalness={0.7} roughness={0.3} />
-        </mesh>
-      </group>
-
     </group>
   );
 };
@@ -441,6 +550,91 @@ const CityCarObstacle3D = ({ position }) => {
   );
 };
 
+// Floating dust particles to simulate ambient city dust/sparks in the air
+const FloatingDustParticles = ({ count = 50 }) => {
+  const pointsRef = useRef();
+  const particles = useMemo(() => {
+    const temp = [];
+    for (let i = 0; i < count; i++) {
+      temp.push({
+        pos: new THREE.Vector3(
+          (Math.random() - 0.5) * 16.0,
+          Math.random() * 4.5 + 0.1,
+          (Math.random() - 0.5) * 16.0
+        ),
+        speedY: 0.12 + Math.random() * 0.15,
+        speedX: (Math.random() - 0.5) * 0.08,
+        speedZ: (Math.random() - 0.5) * 0.08,
+        size: 0.015 + Math.random() * 0.02,
+        phase: Math.random() * Math.PI * 2
+      });
+    }
+    return temp;
+  }, [count]);
+
+  useFrame(({ clock }) => {
+    if (!pointsRef.current) return;
+    const t = clock.getElapsedTime();
+    const children = pointsRef.current.children;
+    particles.forEach((p, idx) => {
+      const mesh = children[idx];
+      if (mesh) {
+        p.pos.y += p.speedY * 0.008;
+        p.pos.x += Math.sin(t + p.phase) * 0.0015;
+        p.pos.z += Math.cos(t + p.phase) * 0.0015;
+        
+        if (p.pos.y > 4.5) p.pos.y = 0.1;
+        mesh.position.copy(p.pos);
+        mesh.material.opacity = 0.2 + Math.sin(t * 1.5 + p.phase) * 0.12;
+      }
+    });
+  });
+
+  return (
+    <group ref={pointsRef}>
+      {particles.map((p, idx) => (
+        <mesh key={idx} position={p.pos}>
+          <boxGeometry args={[p.size, p.size, p.size]} />
+          <meshBasicMaterial color="#4fd1c5" transparent opacity={0.25} blending={THREE.AdditiveBlending} />
+        </mesh>
+      ))}
+    </group>
+  );
+};
+
+// Realistic Warm Streetlight
+const StreetLight3D = ({ position }) => {
+  return (
+    <group position={position}>
+      {/* Dark metallic pole */}
+      <mesh position={[0, 0.4, 0]} castShadow>
+        <cylinderGeometry args={[0.015, 0.015, 0.8, 8]} />
+        <meshStandardMaterial color="#4a5568" metalness={0.7} roughness={0.2} />
+      </mesh>
+      
+      {/* Horizontal light bracket arm */}
+      <mesh position={[0.05, 0.8, 0]} castShadow>
+        <boxGeometry args={[0.12, 0.02, 0.02]} />
+        <meshStandardMaterial color="#4a5568" metalness={0.7} />
+      </mesh>
+      
+      {/* Glowing light head */}
+      <mesh position={[0.10, 0.78, 0]}>
+        <sphereGeometry args={[0.03, 8, 8]} />
+        <meshBasicMaterial color="#fffcf0" />
+      </mesh>
+      
+      {/* Dynamic warm street illumination */}
+      <pointLight
+        position={[0.10, 0.74, 0]}
+        intensity={1.2}
+        distance={3.2}
+        color="#ffe8cc"
+      />
+    </group>
+  );
+};
+
 // Realistic Brick / Concrete Building (Static Obstacle)
 const CityBuilding3D = ({ position, seed }) => {
   const buildingHeight = useMemo(() => 1.4 + (seed % 3) * 0.25, [seed]);
@@ -448,22 +642,30 @@ const CityBuilding3D = ({ position, seed }) => {
   // Custom texture color based on seed - Highly diverse town colors
   const buildingColor = useMemo(() => {
     const colors = [
-      '#a0aec0', // Slate gray concrete
-      '#e2e8f0', // Cream plaster
-      '#ecc94b', // Sunny yellow stucco
-      '#dd6b20', // Mediterranean terracotta
-      '#e53e3e', // Classic red brick
-      '#319795', // Olive teal plaster
-      '#ed8936', // Warm orange brick
-      '#48bb78', // Pastel green wood
-      '#3182ce', // Coastal blue siding
-      '#b7791f'  // Ochre stone
+      '#fcf8f2', // Rich Italian Cream Plaster
+      '#f6ad55', // Mediterranean Terracotta Orange
+      '#fc8181', // Soft Tuscan Peach Stucco
+      '#ecc94b', // Sunny Riviera Yellow
+      '#48bb78', // Pastel Sage Green
+      '#319795', // Modern Aegean Teal Siding
+      '#4299e1', // Cool Scandinavian Blue Wood
+      '#a0aec0', // Chic Industrial Slate Concrete
+      '#b794f4', // Cozy Lavender Stucco
+      '#e53e3e', // Classic Crimson Brick
+      '#ed8936', // Warm Clay Plaster
+      '#718096', // Modern Charcoal Plaster
     ];
     return colors[seed % colors.length];
   }, [seed]);
 
   return (
     <group position={[position[0], buildingHeight / 2, position[2]]}>
+
+      {/* Light Concrete Sidewalk (Kaldırım) framing the building block perfectly */}
+      <mesh position={[0, -buildingHeight / 2 + 0.002, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        <planeGeometry args={[1.08, 1.08]} />
+        <meshStandardMaterial color="#cbd5e0" roughness={0.9} />
+      </mesh>
 
       {/* Main Building Structure (Brick/Concrete look) */}
       <mesh castShadow receiveShadow position={[0, 0, 0]}>
@@ -477,7 +679,7 @@ const CityBuilding3D = ({ position, seed }) => {
         <meshStandardMaterial color="#718096" roughness={0.8} />
       </mesh>
 
-      {/* Classical Grid Multi-pane Glass Windows on all 4 faces (Front, Back, Left, Right) - Highly Optimized for FPS! */}
+      {/* Classical Grid Multi-pane Glass Windows on all 4 faces */}
       {(() => {
         const renderWindowsForFace = (facePos, faceRot) => {
           return (
@@ -487,10 +689,14 @@ const CityBuilding3D = ({ position, seed }) => {
                   const yPos = buildingHeight * yRatio;
                   return (
                     <group key={`${xIdx}-${yIdx}`} position={[xOffset, yPos, 0.002]}>
-                      {/* Dark Blue Reflective Glass Window Pane (Shadow rendering disabled for ultra FPS boost!) */}
+                      {/* Dark Blue Reflective Glass Window Pane reflecting warm sunset */}
                       <mesh>
                         <planeGeometry args={[0.20, 0.16]} />
-                        <meshStandardMaterial color="#1a365d" roughness={0.05} metalness={0.9} />
+                        <meshStandardMaterial
+                          color="#2a4365"
+                          roughness={0.05}
+                          metalness={0.9}
+                        />
                       </mesh>
                       {/* Subtle elegant window framing outline around the pane */}
                       <mesh position={[0, 0, -0.001]}>
@@ -519,16 +725,26 @@ const CityBuilding3D = ({ position, seed }) => {
         );
       })()}
 
-      {/* Concrete Roof Ledge (Slightly lifted by 0.02 to completely avoid Y-overlap Z-fighting/flickering!) */}
+      {/* Concrete Roof Ledge */}
       <mesh position={[0, buildingHeight / 2 + 0.02, 0]} castShadow>
         <boxGeometry args={[0.92, 0.04, 0.92]} />
         <meshStandardMaterial color="#4a5568" roughness={0.8} />
       </mesh>
 
-      {/* Roof Chimney / AC Ventilation unit */}
-      <mesh position={[0.15, buildingHeight / 2 + 0.06, -0.15]} castShadow>
-        <boxGeometry args={[0.18, 0.12, 0.18]} />
-        <meshStandardMaterial color="#718096" roughness={0.5} metalness={0.5} />
+      {/* Cozy Chimney (Şömine Bacası) on the roof */}
+      <mesh position={[-0.20, buildingHeight / 2 + 0.14, 0.20]} castShadow>
+        <boxGeometry args={[0.10, 0.28, 0.10]} />
+        <meshStandardMaterial color="#dd6b20" roughness={0.8} />
+      </mesh>
+      <mesh position={[-0.20, buildingHeight / 2 + 0.29, 0.20]}>
+        <boxGeometry args={[0.12, 0.02, 0.12]} />
+        <meshStandardMaterial color="#2d3748" />
+      </mesh>
+
+      {/* Metal AC Ventilation Unit on the roof */}
+      <mesh position={[0.18, buildingHeight / 2 + 0.05, -0.18]} castShadow>
+        <boxGeometry args={[0.18, 0.10, 0.18]} />
+        <meshStandardMaterial color="#a0aec0" metalness={0.8} roughness={0.3} />
       </mesh>
     </group>
   );
@@ -639,28 +855,48 @@ const LiDARBeams = ({ agentPos, calculatedRays }) => {
 };
 
 // ─── CAMERA MANAGER (SMOOTH CHASE & FIRST PERSON VIEWPORTS) ───
-const CameraController = ({ cameraMode, agent3DPos, lastAction }) => {
+const CameraController = ({ cameraMode, agent3DPos, lastAction, smoothCarPosRef }) => {
   const { camera } = useThree();
   const currentAngleRef = useRef(0);
+  const currentLookAtRef = useRef(null);
+  const smoothAgentPosRef = useRef(null);
+
+  // Ref to hold the latest agent3DPos prop to prevent stale closures in useFrame
+  const agent3DPosRef = useRef(agent3DPos);
+  agent3DPosRef.current = agent3DPos;
 
   useFrame((state, delta) => {
-    if (!agent3DPos) return;
+    // Read directly from the physical car position if available for locked-in tracking
+    let targetPos = null;
+    if (smoothCarPosRef && smoothCarPosRef.current && smoothCarPosRef.current.lengthSq() > 0) {
+      targetPos = smoothCarPosRef.current;
+    } else if (agent3DPosRef.current) {
+      targetPos = new THREE.Vector3(...agent3DPosRef.current);
+    }
 
-    let targetAngle = 0;
+    if (!targetPos) return;
+
+    if (!smoothAgentPosRef.current) {
+      smoothAgentPosRef.current = targetPos.clone();
+    } else {
+      // Sync look-at perfectly to the smooth moving chassis
+      smoothAgentPosRef.current.copy(targetPos);
+    }
+
+    let targetAngle = currentAngleRef.current; // Keep current angle by default
     if (lastAction) {
       switch (lastAction.action_label) {
         case 'UP': targetAngle = 0; break;
         case 'DOWN': targetAngle = Math.PI; break;
         case 'LEFT': targetAngle = Math.PI / 2; break;
         case 'RIGHT': targetAngle = -Math.PI / 2; break;
-        default: targetAngle = 0; break;
       }
     }
 
     let diff = targetAngle - currentAngleRef.current;
     diff = Math.atan2(Math.sin(diff), Math.cos(diff));
 
-    const lerpSpeed = 7.0;
+    const lerpSpeed = 5.0; // Slower for beautiful cinematic drag
     currentAngleRef.current += diff * Math.min(delta * lerpSpeed, 1.0);
 
     const fx = -Math.sin(currentAngleRef.current);
@@ -668,35 +904,76 @@ const CameraController = ({ cameraMode, agent3DPos, lastAction }) => {
     const bx = -fx;
     const bz = -fz;
 
+    let targetCamPos = null;
+    let targetLookAt = null;
+
     if (cameraMode === 'fps') {
-      const targetCamPos = [
-        agent3DPos[0] + bx * 0.05,
-        0.34,
-        agent3DPos[2] + bz * 0.05
+      // Physical cockpit rumble: high-frequency motor vibration when active
+      const t = state.clock.getElapsedTime();
+      const rumbleX = Math.sin(t * 38.0) * 0.0012;
+      const rumbleY = Math.cos(t * 38.0) * 0.0012;
+
+      targetCamPos = [
+        smoothAgentPosRef.current.x + fx * 0.44 + rumbleX,
+        0.34 + rumbleY,
+        smoothAgentPosRef.current.z + fz * 0.44
       ];
-      const targetLookAt = [
-        agent3DPos[0] + fx * 4.0,
-        0.18,
-        agent3DPos[2] + fz * 4.0
+      targetLookAt = [
+        smoothAgentPosRef.current.x + fx * 4.0,
+        0.26,
+        smoothAgentPosRef.current.z + fz * 4.0
       ];
 
-      camera.position.lerp(new THREE.Vector3(...targetCamPos), 0.18);
-      camera.lookAt(new THREE.Vector3(...targetLookAt));
+      camera.position.lerp(new THREE.Vector3(...targetCamPos), Math.min(delta * 12.0, 1.0));
     }
     else if (cameraMode === 'tps') {
-      const targetCamPos = [
-        agent3DPos[0] + bx * 3.2,
+      targetCamPos = [
+        smoothAgentPosRef.current.x + bx * 3.2,
         1.7,
-        agent3DPos[2] + bz * 3.2
+        smoothAgentPosRef.current.z + bz * 3.2
       ];
-      const targetLookAt = [
-        agent3DPos[0] + fx * 1.0,
+      targetLookAt = [
+        smoothAgentPosRef.current.x + fx * 1.0,
         0.2,
-        agent3DPos[2] + fz * 1.0
+        smoothAgentPosRef.current.z + fz * 1.0
       ];
 
-      camera.position.lerp(new THREE.Vector3(...targetCamPos), 0.14);
-      camera.lookAt(new THREE.Vector3(...targetLookAt));
+      camera.position.lerp(new THREE.Vector3(...targetCamPos), Math.min(delta * 10.0, 1.0));
+    }
+    else if (cameraMode === 'drone') {
+      // Drone floats very high in the sky, looking nearly straight down at the agent
+      const droneHeight = 9.0; 
+      const droneDist = 1.8;  // Close horizontal distance for nearly vertical bird's-eye perspective
+      
+      // Amplified wind hover sway at high altitude
+      const t = state.clock.getElapsedTime();
+      const hoverX = Math.sin(t * 1.0) * 0.32;
+      const hoverY = Math.cos(t * 1.3) * 0.22;
+      const hoverZ = Math.sin(t * 0.7) * 0.32;
+
+      targetCamPos = [
+        smoothAgentPosRef.current.x + bx * droneDist + hoverX,
+        droneHeight + hoverY,
+        smoothAgentPosRef.current.z + bz * droneDist + hoverZ
+      ];
+      targetLookAt = [
+        smoothAgentPosRef.current.x,
+        0.0,
+        smoothAgentPosRef.current.z
+      ];
+
+      // Beautiful slow, heavy aerodynamic flight drag (lag)
+      camera.position.lerp(new THREE.Vector3(...targetCamPos), Math.min(delta * 1.8, 1.0));
+    }
+
+    if (targetLookAt) {
+      const tLook = new THREE.Vector3(...targetLookAt);
+      if (!currentLookAtRef.current) {
+        currentLookAtRef.current = tLook.clone();
+      } else {
+        currentLookAtRef.current.lerp(tLook, Math.min(delta * 11.0, 1.0)); // Smooth lookAt transition
+      }
+      camera.lookAt(currentLookAtRef.current);
     }
   });
 
@@ -705,9 +982,10 @@ const CameraController = ({ cameraMode, agent3DPos, lastAction }) => {
 
 // ─── MAIN 3D SIMULATOR COMPONENT ───
 
-export default function Simulation3D({ size, baseGrid, agentPos, goalPos, waypoints = [], currentWaypointIndex = 0, trafficLights = [], lightsGreen = false, dynamicObstacles, lastAction }) {
+export default function Simulation3D({ size, baseGrid, agentPos, goalPos, waypoints = [], currentWaypointIndex = 0, trafficLights = [], lightsGreen = false, dynamicObstacles, lastAction, simSpeed = 450 }) {
   const [cameraMode, setCameraMode] = useState('orbit');
   const halfGrid = size / 2;
+  const smoothCarPosRef = useRef(new THREE.Vector3());
 
   const to3DCoords = (row, col, height = 0.0) => {
     return [
@@ -716,6 +994,14 @@ export default function Simulation3D({ size, baseGrid, agentPos, goalPos, waypoi
       row - halfGrid + 0.5
     ];
   };
+
+  // Capture initial starting position of the episode dynamically
+  const startPos3D = useMemo(() => {
+    if (agentPos) {
+      return to3DCoords(agentPos.row, agentPos.col, 0.0);
+    }
+    return null;
+  }, [goalPos]); // Re-evaluate only when goalPos changes (triggers on episode start!)
 
   const asphaltTexture = useMemo(() => createAsphaltTexture(), []);
   const grassTexture = useMemo(() => createGrassTexture(), []);
@@ -907,29 +1193,51 @@ export default function Simulation3D({ size, baseGrid, agentPos, goalPos, waypoi
         >
           👁️ SÜRÜCÜ GÖZÜ (FPS)
         </button>
+        <button
+          onClick={() => setCameraMode('drone')}
+          style={{
+            background: cameraMode === 'drone' ? '#3182ce' : 'transparent',
+            color: '#fff',
+            border: 'none',
+            padding: '7px 14px',
+            fontSize: '11px',
+            fontWeight: 'bold',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+            fontFamily: 'monospace'
+          }}
+        >
+          🛸 DRONE KAMERA
+        </button>
       </div>
 
       {/* R3F Canvas - High realism, highly optimized, SHADOWS ENABLED for only 1 directional light! */}
       <Canvas shadows camera={{ position: [0, size * 0.8, size * 0.8], fov: 42 }}>
+        <Suspense fallback={null}>
 
-        {/* Beautiful Natural Sky and Sun setting */}
+        {/* Beautiful Natural Sky and Sun setting (Golden Hour) */}
         <Sky
           distance={450000}
-          sunPosition={[20, 25, 20]}
-          turbidity={4}
-          rayleigh={1.0}
+          sunPosition={[25, 12, 20]}
+          turbidity={6}
+          rayleigh={1.2}
           mieCoefficient={0.005}
           mieDirectionalG={0.8}
         />
 
-        {/* Ambient fill light */}
-        <ambientLight intensity={0.55} />
+        {/* Soft natural golden hour atmospheric fog (Pushed far away to prevent whitening on zoom out!) */}
+        <fog attach="fog" args={["#e2e8f0", 50.0, 150.0]} />
 
-        {/* Primary Sunlight (The ONLY shadow-casting light in the entire scene! Highly Optimized!) */}
+        {/* Warm Ambient fill light */}
+        <ambientLight intensity={0.7} color="#fffcf0" />
+
+        {/* Primary Warm Sunlight (The shadow-casting light) */}
         <directionalLight
           castShadow
-          position={[25, 45, 20]}
-          intensity={1.2}
+          position={[25, 12, 20]}
+          intensity={1.4}
+          color="#ffd8a8"
           shadow-mapSize={[1024, 1024]}
           shadow-camera-far={100}
           shadow-camera-left={-size}
@@ -1019,9 +1327,22 @@ export default function Simulation3D({ size, baseGrid, agentPos, goalPos, waypoi
         {/* Realistic Golden Goal Trophy */}
         {goal3DPos && <Goal3D position={goal3DPos} />}
 
+        {/* Dynamic Starting Point Laser Beacon */}
+        {startPos3D && <StartPoint3D position={startPos3D} />}
+
         {/* Realistic Orange Checkpoint Waypoints */}
         {remainingWaypoints3D.map(w => (
           <Waypoint3D key={w.id} position={w.pos} />
+        ))}
+
+        {/* Cozy City Streetlights (Warm glowing poles casting soft light onto the asphalt) */}
+        {[
+          [-size / 4, -size / 4],
+          [size / 4, -size / 4],
+          [-size / 4, size / 4],
+          [size / 4, size / 4]
+        ].map(([x, z], idx) => (
+          <StreetLight3D key={`light-${idx}`} position={[x, 0.0, z]} />
         ))}
 
         {/* Realistic Traffic Lights */}
@@ -1029,8 +1350,10 @@ export default function Simulation3D({ size, baseGrid, agentPos, goalPos, waypoi
           <TrafficLight3D key={t.id} position={t.pos} isGreen={lightsGreen} />
         ))}
 
-        {/* Agent (Brushed Steel Cybertruck) */}
-        {agent3DPos && <Agent3D position={agent3DPos} lastAction={lastAction} />}
+        {/* Agent (Real GLTF Supercar loaded via useGLTF with Suspense fallback) */}
+        {agent3DPos && (
+          <Agent3D position={agent3DPos} lastAction={lastAction} smoothCarPosRef={smoothCarPosRef} simSpeed={simSpeed} />
+        )}
 
         {/* Red Sports Cars (Dynamic Obstacles) */}
         {dynObstacles3D.map(o => (
@@ -1041,7 +1364,7 @@ export default function Simulation3D({ size, baseGrid, agentPos, goalPos, waypoi
         {agent3DPos && <LiDARBeams agentPos={agent3DPos} calculatedRays={calculatedRays} />}
 
         {/* Dynamic Camera Controllers */}
-        <CameraController cameraMode={cameraMode} agent3DPos={agent3DPos} lastAction={lastAction} />
+        <CameraController cameraMode={cameraMode} agent3DPos={agent3DPos} lastAction={lastAction} smoothCarPosRef={smoothCarPosRef} />
 
         {/* Orbit Controls (Only active in free orbit mode) */}
         <OrbitControls
@@ -1052,6 +1375,8 @@ export default function Simulation3D({ size, baseGrid, agentPos, goalPos, waypoi
           minDistance={2.0}
           maxDistance={size * 1.5}
         />
+
+        </Suspense>
       </Canvas>
 
       {/* City Twin Info Panel Card */}
